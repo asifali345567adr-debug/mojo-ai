@@ -11,7 +11,7 @@ const LS_SETTINGS = "mojo.settings.v1";
 
 let conversations = [];
 let activeId = null;
-let settings = { voiceInput: true, tts: true };
+let settings = { voiceInput: true, tts: true, voiceLang: "ur-PK" };
 let attachedImage = null; // data URL
 let health = null;
 let sending = false;
@@ -44,7 +44,7 @@ function saveSettings() { try { localStorage.setItem(LS_SETTINGS, JSON.stringify
 function loadSettings() {
   try {
     const raw = localStorage.getItem(LS_SETTINGS);
-    if (raw) settings = Object.assign({ voiceInput: true, tts: true }, JSON.parse(raw));
+    if (raw) settings = Object.assign({ voiceInput: true, tts: true, voiceLang: "ur-PK" }, JSON.parse(raw));
   } catch (e) {}
 }
 
@@ -484,7 +484,7 @@ function historyPayload(c) {
 /* Streams an SSE chat response into a live bubble.
    Returns { text, bodyEl }. Rendering is throttled so long replies stay smooth,
    and autoscroll never yanks the user away from history they are reading. */
-async function streamAssistantReply(res) {
+async function streamAssistantReply(res, onChunk) {
   const sc = $("#chatScroll");
   sc.classList.add("streaming");
   sc.setAttribute("aria-busy", "true");
@@ -514,6 +514,7 @@ async function streamAssistantReply(res) {
         } catch (e) { continue; }
         if (delta) {
           acc += delta;
+          if (onChunk) { try { onChunk(acc); } catch (e) {} }
           const now = performance.now();
           if (now - lastRender > 120) {
             lastRender = now;
@@ -540,6 +541,7 @@ const CHAT_TIMEOUT_MS = 75000;
 
 function stopCurrentSend() {
   stopReason = "stopped";
+  stopSpeak();
   if (sendAbort) { try { sendAbort.abort(); } catch (e) {} }
 }
 function abortInflight() {
@@ -589,12 +591,15 @@ async function sendMessage(text) {
       handleChatError(data.error, data.detail, res.status);
     } else if (ct.includes("text/event-stream") && res.body) {
       removeThinking();
-      const { text: streamed, bodyEl } = await streamAssistantReply(res);
+      speakStreamStart(); // streaming TTS: first sentence speaks the moment it arrives
+      const { text: streamed, bodyEl } = await streamAssistantReply(res, speakStreamChunk);
       const row = bodyEl.closest(".msg");
       if (stopReason === "stopped" && !streamed) {
         if (row) row.remove(); // stopped before anything arrived: leave no trace
+        stopSpeak();
       } else if ((stopReason === "timeout" || res.status === 504) && !streamed) {
         if (row) row.remove();
+        stopSpeak();
         handleChatError("AI_TIMEOUT", "", res.status);
       } else {
         const reply = streamed || "I didn't get a response. Please try again.";
@@ -603,7 +608,7 @@ async function sendMessage(text) {
         c.messages.push({ role: "assistant", text: reply, ts: Date.now() });
         c.updatedAt = Date.now(); saveConvs();
         renderSidebar($("#searchInput").value);
-        if (c.id === activeId) speak(reply);
+        speakStreamEnd(); // speak any trailing sentence fragment
       }
     } else {
       const data = await res.json().catch(() => ({}));
@@ -666,7 +671,7 @@ function toggleListening() {
   if (listening) { try { recognition.stop(); } catch (e) {} return; }
   try {
     recognition = new SR();
-    recognition.lang = navigator.language || "en-US";
+    recognition.lang = settings.voiceLang || navigator.language || "en-US";
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
     recognition.onresult = e => {
@@ -697,29 +702,65 @@ function toggleListening() {
 function loadVoices() {
   try { voices = speechSynthesis.getVoices() || []; } catch (e) { voices = []; }
 }
-function pickVoice() {
-  const en = voices.filter(v => /^en([-_]|$)/i.test(v.lang || ""));
+/* Pick a voice for the user's chosen voice language (Urdu / Hindi / English),
+   preferring a male-sounding system voice when one exists. */
+function ttsVoiceFor() {
+  const want = String(settings.voiceLang || "en").slice(0, 2).toLowerCase();
   const maleHints = /male|\b(david|daniel|james|mark|alex|fred|george|arthur|thomas|oliver|liam|noah|ryan|brian|christopher)\b/i;
-  return en.find(v => maleHints.test(v.name || "")) || en[0] || voices[0] || null;
+  const inLang = voices.filter(v => String(v.lang || "").toLowerCase().startsWith(want));
+  const enMale = voices.find(v => maleHints.test(v.name || "") && /^en/i.test(String(v.lang || "")));
+  const enAny = voices.find(v => /^en/i.test(String(v.lang || "")));
+  return inLang.find(v => maleHints.test(v.name || "")) || inLang[0] || enMale || enAny || voices[0] || null;
 }
-function speak(text) {
-  if (!settings.tts) return;
-  if (!("speechSynthesis" in window)) return;
+function ttsEnqueue(text) {
+  if (!settings.tts || !("speechSynthesis" in window)) return;
+  const clean = String(text || "").replace(/`+/g, " ").replace(/\s+/g, " ").trim().slice(0, 500);
+  if (clean.length < 2) return;
   try {
-    speechSynthesis.cancel();
-    const clean = String(text || "").replace(/```[\s\S]*?```/g, " (code block omitted) ").slice(0, 1500);
-    if (!clean.trim()) return;
     const u = new SpeechSynthesisUtterance(clean);
-    const v = pickVoice();
-    if (v) u.voice = v;
+    const v = ttsVoiceFor();
+    if (v) { u.voice = v; u.lang = v.lang; }
     u.pitch = 0.85; u.rate = 1.0;
     u.onstart = () => setCoreState("speaking");
     u.onend = u.onerror = () => { if (!sending && !listening) setCoreState("idle"); };
     speechSynthesis.speak(u);
   } catch (e) { /* TTS unavailable */ }
 }
+/* Full-reply fallback for the non-streaming path. */
+function speak(text) {
+  if (!settings.tts) return;
+  if (!("speechSynthesis" in window)) return;
+  try {
+    speechSynthesis.cancel();
+    ttsPending = "";
+    const clean = String(text || "").replace(/```[\s\S]*?```/g, " (code block omitted) ").slice(0, 1500);
+    if (clean.trim()) ttsEnqueue(clean);
+  } catch (e) { /* TTS unavailable */ }
+}
 function stopSpeak() {
+  ttsPending = "";
   try { if ("speechSynthesis" in window) speechSynthesis.cancel(); } catch (e) {}
+}
+/* ---- Streaming TTS: speak each finished sentence the moment it arrives,
+   so voice replies start instantly instead of waiting for the full answer.
+   Understands English and Urdu/Hindi sentence endings (. ! ? and ۔). ---- */
+let ttsPending = "";
+function speakStreamStart() { ttsPending = ""; }
+function speakStreamChunk(fullText) {
+  if (!settings.tts || !("speechSynthesis" in window)) return;
+  ttsPending = String(fullText || "");
+  const re = /(.+?[.!?۔])(\s+|$)/g;
+  let m, last = 0;
+  while ((m = re.exec(ttsPending))) {
+    ttsEnqueue(m[1]);
+    last = m.index + m[0].length;
+  }
+  if (last > 0) ttsPending = ttsPending.slice(last);
+}
+function speakStreamEnd() {
+  const rest = ttsPending.trim();
+  ttsPending = "";
+  if (rest.length > 1) ttsEnqueue(rest);
 }
 
 /* ================= Image attach ================= */
@@ -793,6 +834,8 @@ function closeDrawer() {
 function applySettingsUI() {
   $("#tglVoice").checked = !!settings.voiceInput;
   $("#tglTTS").checked = !!settings.tts;
+  const sel = $("#selVoiceLang");
+  if (sel) sel.value = settings.voiceLang || "ur-PK";
 }
 
 /* ================= Init ================= */
@@ -851,6 +894,11 @@ function init() {
   $("#tglTTS").addEventListener("change", e => {
     settings.tts = e.target.checked; saveSettings();
     if (!settings.tts) stopSpeak();
+  });
+  $("#selVoiceLang").addEventListener("change", e => {
+    settings.voiceLang = e.target.value || "ur-PK"; saveSettings();
+    stopSpeak();
+    toast("Voice language set. It applies to the next voice input and reply.");
   });
   $("#clearAll").addEventListener("click", () => {
     if (!conversations.length) { toast("There are no conversations to delete."); return; }
