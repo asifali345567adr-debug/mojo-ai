@@ -264,6 +264,14 @@ async function refreshHealth() {
     clearTimeout(slow);
     notice.hidden = true;
     renderStatus();
+    // Silent warmup: keeps the chat function hot so the first message feels instant.
+    if (health && health.keyConfigured) {
+      fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ warmup: true })
+      }).catch(() => {});
+    }
   }
 }
 function renderStatus() {
@@ -464,6 +472,45 @@ function historyPayload(c) {
     .slice(-20)
     .map(m => ({ role: m.role, text: m.text || "" }));
 }
+/* Streams an SSE chat response into a live bubble; returns the full text. */
+async function streamAssistantReply(res) {
+  const bodyEl = appendMessageBubble("assistant", "", null, false);
+  let acc = "";
+  try {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (line.slice(0, 5) !== "data:") continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        let delta = "";
+        try {
+          const j = JSON.parse(data);
+          delta = (j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || "";
+        } catch (e) { continue; }
+        if (delta) {
+          acc += delta;
+          bodyEl.innerHTML = renderMarkdown(acc);
+          scrollBottom();
+        }
+      }
+    }
+    try { reader.releaseLock(); } catch (e) {}
+  } catch (e) {
+    // stream interrupted; keep whatever arrived
+  }
+  bodyEl.innerHTML = renderMarkdown(acc);
+  scrollBottom();
+  return acc;
+}
 async function sendMessage(text) {
   text = (text || "").trim();
   if (sending) return;
@@ -491,16 +538,31 @@ async function sendMessage(text) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    const data = await res.json().catch(() => ({}));
-    removeThinking();
-    if (!res.ok || data.error) {
+    const ct = res.headers.get("content-type") || "";
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      removeThinking();
       handleChatError(data.error, data.detail, res.status);
-    } else {
-      const reply = data.reply || "I didn't get a response. Please try again.";
+    } else if (ct.includes("text/event-stream") && res.body) {
+      removeThinking();
+      const streamed = await streamAssistantReply(res);
+      const reply = streamed || "I didn't get a response. Please try again.";
       c.messages.push({ role: "assistant", text: reply, ts: Date.now() });
       c.updatedAt = Date.now(); saveConvs();
-      appendMessageBubble("assistant", reply, null, true);
+      renderSidebar($("#searchInput").value);
       speak(reply);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      removeThinking();
+      if (data.error) {
+        handleChatError(data.error, data.detail, res.status);
+      } else {
+        const reply = data.reply || "I didn't get a response. Please try again.";
+        c.messages.push({ role: "assistant", text: reply, ts: Date.now() });
+        c.updatedAt = Date.now(); saveConvs();
+        appendMessageBubble("assistant", reply, null, true);
+        speak(reply);
+      }
     }
   } catch (e) {
     removeThinking();
