@@ -1,0 +1,1 @@
+{"engines":{"node":">=18"},"name":"mojo-ai-backend","scripts":{"start":"node server.mjs"},"type":"module","version":"1.0.0"}

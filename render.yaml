@@ -1,0 +1,19 @@
+# Render Blueprint — one-click deploy for the Mojo AI backend.
+# Render dashboard → New + → Blueprint → connect the repo holding these files.
+# Render will prompt for AI_API_KEY (paste your OpenRouter key) and deploy.
+
+services:
+  - type: web
+    name: mojo-ai-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: AI_API_KEY
+        sync: false # you paste your OpenRouter API key at deploy time (never committed)
+      - key: AI_API_URL
+        value: https://openrouter.ai/api/v1
+      - key: AI_MODEL
+        value: deepseek/deepseek-v4-flash-0731:free
