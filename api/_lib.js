@@ -12,6 +12,13 @@ export const VISION_MODEL = process.env.AI_VISION_MODEL || "qwen/qwen3.8-27b:fre
 // ever sees an error.
 export const VISION_FALLBACK_MODEL =
   process.env.AI_VISION_FALLBACK_MODEL || "google/gemma-4-31b-it:free";
+// Second and third backup vision models from different providers. The backend
+// walks the whole chain (primary + three fallbacks) before giving up, because
+// free vision models are flaky and often hang or error out.
+export const VISION_FALLBACK2_MODEL =
+  process.env.AI_VISION_FALLBACK2_MODEL || "inclusionai/ling-3.0-flash-vl:free";
+export const VISION_FALLBACK3_MODEL =
+  process.env.AI_VISION_FALLBACK3_MODEL || "nex-agi/nex-n2.5-mini:free";
 export const SYSTEM_PROMPT =
   process.env.AI_SYSTEM_PROMPT ||
   "You are Mojo, a precise and efficient AI assistant with dry wit. Address the user as sir. Keep answers concise unless detail is requested.";
@@ -135,7 +142,11 @@ export async function providerPost(url, bodyObj, signal, attempts = 3) {
       try {
         if (resp.body && resp.body.cancel) await resp.body.cancel();
       } catch (e) {}
-      if (resp.status < 500 || attempt === attempts) break;
+      // Retry transient failures: server errors (5xx) and rate limits (429).
+      // Free OpenRouter providers rate-limit often; a short backoff usually
+      // clears it. Other 4xx errors are final and are never retried.
+      const retryable = resp.status >= 500 || resp.status === 429;
+      if (!retryable || attempt === attempts) break;
     } catch (e) {
       if (e && e.name === "AbortError") throw e;
       lastStatus = 0;

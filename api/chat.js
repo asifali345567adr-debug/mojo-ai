@@ -4,6 +4,8 @@ import {
   MODEL,
   VISION_MODEL,
   VISION_FALLBACK_MODEL,
+  VISION_FALLBACK2_MODEL,
+  VISION_FALLBACK3_MODEL,
   MAX_MESSAGE_CHARS,
   MAX_IMAGE_CHARS,
   PROVIDER_TIMEOUT_MS,
@@ -59,35 +61,56 @@ export default async function handler(req, res) {
 
   // The model is chosen server-side only. Clients can never override it,
   // so nobody can point your key at a different (expensive) model.
-  // Vision requests get an automatic backup model: free vision providers go
-  // down often, so if the primary vision model errors we retry the same
-  // request on the fallback before the user ever sees an error.
-  const models = hasImage ? [VISION_MODEL, VISION_FALLBACK_MODEL] : [MODEL];
+  // Vision requests get an automatic backup chain: free vision providers go
+  // down or hang often, so the backend walks primary + three fallbacks from
+  // different providers before the user ever sees an error.
+  const models = hasImage
+    ? [VISION_MODEL, VISION_FALLBACK_MODEL, VISION_FALLBACK2_MODEL, VISION_FALLBACK3_MODEL]
+    : [MODEL];
 
-  // The provider call gets one overall deadline (PROVIDER_TIMEOUT_MS) that
-  // covers the request plus any automatic retries of transient failures.
-  // Once the stream's headers arrive, the timer is cleared and the stream
-  // phase runs untimed, exactly as before.
+  // Each model in the chain gets its own deadline (PER_MODEL_TIMEOUT_MS), so a
+  // hung primary can never starve the fallbacks of their chance — previously a
+  // single shared deadline let one slow model burn the whole budget and the
+  // user got "took too long" without the fallback ever being tried. An overall
+  // cap (PROVIDER_TIMEOUT_MS) still bounds the whole attempt.
+  const PER_MODEL_TIMEOUT_MS = 18000;
   let upstream;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+    const overall = new AbortController();
+    const overallTimer = setTimeout(() => overall.abort(), PROVIDER_TIMEOUT_MS);
     let out;
     try {
       for (let i = 0; i < models.length; i++) {
-        out = await providerPost(
-          `${API_URL}/chat/completions`,
-          { model: models[i], messages: buildMessages(body), stream: true },
-          controller.signal,
-          i === 0 ? 3 : 2
-        );
+        if (overall.signal.aborted) break; // overall deadline hit: stop
+        const mc = new AbortController();
+        const mt = setTimeout(() => mc.abort(), PER_MODEL_TIMEOUT_MS);
+        const forwardAbort = () => mc.abort();
+        overall.signal.addEventListener("abort", forwardAbort);
+        try {
+          out = await providerPost(
+            `${API_URL}/chat/completions`,
+            { model: models[i], messages: buildMessages(body), stream: true },
+            mc.signal,
+            models.length === 1 ? 3 : 2
+          );
+        } catch (e) {
+          // Per-model deadline hit (AbortError) or a sync failure: record it
+          // and move on to the next model in the chain.
+          out = {
+            ok: false,
+            status: 0,
+            detail: e && e.name === "AbortError" ? "model timed out" : String((e && e.message) || e),
+          };
+        } finally {
+          clearTimeout(mt);
+          overall.signal.removeEventListener("abort", forwardAbort);
+        }
         if (out.ok) break;
-        if (controller.signal.aborted) break; // overall deadline hit: stop
         const s = out.status || 0;
         if (s !== 0 && s < 500 && s !== 429) break; // client error: final
       }
     } finally {
-      clearTimeout(timer);
+      clearTimeout(overallTimer);
     }
     if (!out.ok) {
       noStore(res);

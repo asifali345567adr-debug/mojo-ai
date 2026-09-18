@@ -863,13 +863,15 @@ function handleChatError(code, detail, status) {
   } else if (code === "IMAGE_TOO_LARGE") {
     msg = "That image is too large. Please use a smaller image and try again.";
   } else if (code === "AI_CONNECTION_ERROR") {
-    msg = "The AI provider returned an error" + (detail ? ": " + detail : ".") + " Please try again.";
+    msg = "The AI provider returned an error" + (detail ? ": " + detail : ".");
+    if (!/please try again\.?\s*$/i.test(String(detail || "").trim())) msg += " Please try again.";
   } else if (code === "NETWORK" || status === 0) {
     msg = "Couldn't reach the server. Check your connection and try again.";
   } else if (code === "empty_message") {
     msg = "Please type a message or attach an image first.";
   } else {
-    msg = "Something went wrong" + (detail ? ": " + detail : ".") + " Please try again.";
+    msg = "Something went wrong" + (detail ? ": " + detail : ".");
+    if (!/please try again\.?\s*$/i.test(String(detail || "").trim())) msg += " Please try again.";
   }
   const c = getActive();
   if (c) { c.messages.push({ role: "error", text: msg, ts: Date.now() }); saveConvs(); }
