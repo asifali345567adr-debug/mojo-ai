@@ -95,10 +95,19 @@ export function buildMessages(body) {
   return messages;
 }
 
-export function providerHeaders() {
+// A personal API key the user typed into the app on their own device. It
+// arrives in the X-Brain-Key header, is never logged or echoed back, and when
+// present it takes precedence over the server key for that request only.
+export function userKeyFromReq(req) {
+  const h = req.headers && (req.headers["x-brain-key"] || req.headers["X-Brain-Key"]);
+  const k = typeof h === "string" ? h.trim() : "";
+  return k.length > 0 && k.length <= 500 ? k : "";
+}
+
+export function providerHeaders(apiKey) {
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${API_KEY}`,
+    Authorization: `Bearer ${apiKey || API_KEY}`,
     "HTTP-Referer": "https://mojo-ai.vercel.app",
     "X-Title": "Mojo AI",
   };
@@ -119,7 +128,7 @@ export function fetchWithTimeout(url, opts, ms) {
 // before we ever bother the user about it. Client errors (4xx) are final and
 // are never retried. `signal` should carry an overall deadline; retries share
 // whatever budget is left.
-export async function providerPost(url, bodyObj, signal, attempts = 3) {
+export async function providerPost(url, bodyObj, signal, attempts = 3, apiKey = "") {
   const payload = JSON.stringify(bodyObj);
   let lastStatus = 0;
   let lastErrText = "";
@@ -132,7 +141,7 @@ export async function providerPost(url, bodyObj, signal, attempts = 3) {
     try {
       const resp = await fetch(url, {
         method: "POST",
-        headers: providerHeaders(),
+        headers: providerHeaders(apiKey),
         body: payload,
         signal: signal || undefined,
       });

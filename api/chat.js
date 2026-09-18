@@ -13,6 +13,7 @@ import {
   clientIp,
   rateLimited,
   providerPost,
+  userKeyFromReq,
   noStore,
 } from "./_lib.js";
 
@@ -44,6 +45,9 @@ export default async function handler(req, res) {
     noStore(res);
     return res.status(500).json({ error: "AI_CONNECTION_NOT_CONFIGURED" });
   }
+  // A personal key from the user's own device (X-Brain-Key header) takes
+  // precedence over the server key for this request only.
+  const activeKey = userKeyFromReq(req) || API_KEY;
 
   const userText = String(body.message || "").slice(0, MAX_MESSAGE_CHARS);
   const hasImage =
@@ -91,7 +95,8 @@ export default async function handler(req, res) {
             `${API_URL}/chat/completions`,
             { model: models[i], messages: buildMessages(body), stream: true },
             mc.signal,
-            models.length === 1 ? 3 : 2
+            models.length === 1 ? 3 : 2,
+            activeKey
           );
         } catch (e) {
           // Per-model deadline hit (AbortError) or a sync failure: record it

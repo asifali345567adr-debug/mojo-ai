@@ -8,6 +8,21 @@ const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 const LS_CONV = "mojo.conversations.v1";
 const LS_SETTINGS = "mojo.settings.v1";
+const LS_BRAIN_KEY = "mojo.brain.key.v1"; // personal API key, stored only in this browser
+
+/* Personal brain key: the user can paste their own OpenRouter API key in
+   Settings → Connection. It never leaves the device except as the X-Brain-Key
+   request header to our own backend, which uses it for the provider call
+   instead of the server key. The key value is never written into the page. */
+function getBrainKey() {
+  try { return localStorage.getItem(LS_BRAIN_KEY) || ""; } catch (e) { return ""; }
+}
+function brainKeyHeaders(extra) {
+  const k = getBrainKey();
+  const h = extra ? Object.assign({}, extra) : {};
+  if (k) h["X-Brain-Key"] = k;
+  return h;
+}
 
 let conversations = [];
 let activeId = null;
@@ -469,7 +484,7 @@ async function refreshHealth() {
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 95000);
-    const res = await fetch("/api/health", { signal: ctrl.signal });
+    const res = await fetch("/api/health", { signal: ctrl.signal, headers: brainKeyHeaders() });
     clearTimeout(to);
     health = await res.json();
   } catch (e) {
@@ -482,7 +497,7 @@ async function refreshHealth() {
     if (health && health.keyConfigured) {
       fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: brainKeyHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ warmup: true })
       }).catch(() => {});
     }
@@ -506,9 +521,58 @@ function renderStatus() {
   $("#setServer").className = "set-val " + ((!health || health.offline) ? "bad" : "good");
   $("#setModel").textContent = (health && health.model) || "—";
   const brain = $("#setBrain");
+  const personal = !!getBrainKey();
   if (!health || health.offline) { brain.textContent = "Unknown"; brain.className = "set-val"; }
-  else if (health.keyConfigured) { brain.textContent = "Connected"; brain.className = "set-val good"; }
+  else if (health.keyConfigured) { brain.textContent = personal ? "Connected (your key)" : "Connected"; brain.className = "set-val good"; }
   else { brain.textContent = "Not connected"; brain.className = "set-val bad"; }
+}
+
+/* ================= Personal brain key ================= */
+function setBrainKeyNote(t) {
+  const n = $("#brainKeyNote");
+  if (n) n.textContent = t;
+}
+function syncBrainKeyUI() {
+  const input = $("#brainKeyInput");
+  if (!input) return;
+  const has = !!getBrainKey();
+  input.value = "";
+  input.placeholder = has ? "•••••••• — a key is saved on this device" : "sk-or-… (OpenRouter key)";
+  setBrainKeyNote(has
+    ? "A personal key is saved on this device — Mojo's brain uses it here."
+    : "Saved only in this phone or PC's browser. When set, your key is used for Mojo's brain on this device.");
+}
+async function saveBrainKey() {
+  const input = $("#brainKeyInput");
+  const key = ((input && input.value) || "").trim();
+  if (!key) { setBrainKeyNote("Paste your OpenRouter API key first."); return; }
+  setBrainKeyNote("Testing your key with the brain…");
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Brain-Key": key },
+      body: JSON.stringify({ message: "Reply with exactly: key ok", history: [] })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setBrainKeyNote("Key test failed (" + (data.detail || data.error || ("HTTP " + res.status)) + ") — not saved. Check the key and try again.");
+      return;
+    }
+    try { if (res.body && res.body.cancel) await res.body.cancel(); } catch (e) {}
+    try { localStorage.setItem(LS_BRAIN_KEY, key); }
+    catch (e) { setBrainKeyNote("Could not save in this browser's storage."); return; }
+    syncBrainKeyUI();
+    toast("Personal brain key saved on this device.");
+    refreshHealth();
+  } catch (e) {
+    setBrainKeyNote("Could not reach the server. Key not saved.");
+  }
+}
+function removeBrainKey() {
+  try { localStorage.removeItem(LS_BRAIN_KEY); } catch (e) {}
+  syncBrainKeyUI();
+  toast("Personal key removed. Using the server key.");
+  refreshHealth();
 }
 
 /* ================= Sidebar ================= */
@@ -794,7 +858,7 @@ async function sendMessage(text) {
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: brainKeyHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
       signal: sendAbort.signal
     });
@@ -854,7 +918,7 @@ async function sendMessage(text) {
 function handleChatError(code, detail, status) {
   let msg;
   if (code === "AI_CONNECTION_NOT_CONFIGURED") {
-    msg = "The AI brain is not connected. Set AI_API_KEY on the server (Vercel dashboard → Project → Settings → Environment Variables), then refresh this page.";
+    msg = "The AI brain is not connected. Add your API key in Settings → Connection → Personal brain key, or set AI_API_KEY on the server (Vercel dashboard → Project → Settings → Environment Variables), then refresh this page.";
     $("#keyBanner").hidden = false;
   } else if (code === "RATE_LIMITED") {
     msg = "Rate limited — too many requests. Please wait a moment and try again.";
@@ -1136,10 +1200,13 @@ function init() {
   $("#scrim").addEventListener("click", closeMobileSidebar);
 
   // Settings drawer
-  $("#settingsBtn").addEventListener("click", () => { renderStatus(); openDrawer(); });
+  $("#settingsBtn").addEventListener("click", () => { renderStatus(); syncBrainKeyUI(); openDrawer(); });
   $("#drawerClose").addEventListener("click", closeDrawer);
   $("#drawerScrim").addEventListener("click", closeDrawer);
   $("#refreshHealth").addEventListener("click", () => { refreshHealth(); toast("Checking server status…"); });
+  $("#saveBrainKey").addEventListener("click", saveBrainKey);
+  $("#removeBrainKey").addEventListener("click", removeBrainKey);
+  $("#brainKeyInput").addEventListener("keydown", e => { if (e.key === "Enter") saveBrainKey(); });
   $("#tglVoice").addEventListener("change", e => { settings.voiceInput = e.target.checked; saveSettings(); });
   $("#tglTTS").addEventListener("change", e => {
     settings.tts = e.target.checked; saveSettings();

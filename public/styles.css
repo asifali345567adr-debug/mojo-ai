@@ -349,6 +349,18 @@ body {
   padding: 8px 12px; cursor: pointer; outline: 0; max-width: 60%;
 }
 .select:focus { border-color: rgba(255,138,42,0.6); }
+.text-input {
+  width: 100%; box-sizing: border-box; margin-top: 6px;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border-strong);
+  border-radius: 10px; color: var(--text); font: 500 13.5px var(--mono);
+  padding: 9px 12px; outline: 0;
+}
+.text-input:focus { border-color: rgba(255,138,42,0.6); }
+.text-input::placeholder { color: var(--faint); font-family: var(--font); }
+.set-key-block { margin-top: 12px; }
+.set-key-label { font-size: 13px; color: var(--text); font-weight: 600; }
+.set-key-btns { display: flex; gap: 8px; }
+.set-key-btns .btn-ghost { margin-top: 8px; }
 .select option { background: #12121a; color: var(--text); }
 .btn-ghost, .btn-danger {
   display: inline-flex; align-items: center; gap: 8px; margin-top: 10px;

@@ -134,6 +134,15 @@
       <div class="set-row"><span>Server</span><span id="setServer" class="set-val">Checking…</span></div>
       <div class="set-row"><span>Model</span><span id="setModel" class="set-val mono">—</span></div>
       <div class="set-row"><span>Brain</span><span id="setBrain" class="set-val">—</span></div>
+      <div class="set-key-block">
+        <label for="brainKeyInput" class="set-key-label">Personal brain key</label>
+        <input id="brainKeyInput" type="password" class="text-input" placeholder="sk-or-… (OpenRouter key)" autocomplete="off" spellcheck="false" aria-label="Personal brain API key">
+        <div class="set-key-btns">
+          <button id="saveBrainKey" class="btn-ghost" type="button">Save key</button>
+          <button id="removeBrainKey" class="btn-ghost" type="button">Remove</button>
+        </div>
+        <p id="brainKeyNote" class="set-note">Saved only in this phone's browser. When set, your key is used for Mojo's brain on this device.</p>
+      </div>
       <button id="refreshHealth" class="btn-ghost" type="button">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         Refresh status
