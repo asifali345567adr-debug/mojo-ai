@@ -11,14 +11,22 @@ export const SYSTEM_PROMPT =
   process.env.AI_SYSTEM_PROMPT ||
   "You are Mojo, a precise and efficient AI assistant with dry wit. Address the user as sir. Keep answers concise unless detail is requested.";
 
+// Safety caps.
+export const MAX_MESSAGE_CHARS = 4000;
+export const MAX_HISTORY_ITEMS = 20;
+export const MAX_IMAGE_CHARS = 1_500_000; // data-URL chars (~1.1 MB of image bytes, base64-inflated)
+export const PROVIDER_TIMEOUT_MS = 50_000;
+
 const PER_MINUTE = Number(process.env.RATE_PER_MINUTE) || 30;
 const PER_DAY = Number(process.env.RATE_PER_DAY) || 300;
 
-// Tiny in-memory per-IP rate limiter (best-effort on serverless: resets per instance).
+// In-memory per-IP rate limiter (best-effort on serverless: each instance keeps its own counters).
 const buckets = new Map();
 export function clientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
   if (typeof fwd === "string" && fwd) return fwd.split(",")[0].trim();
+  const real = req.headers["x-real-ip"];
+  if (typeof real === "string" && real) return real.trim();
   return "unknown";
 }
 export function rateLimited(ip) {
@@ -32,27 +40,41 @@ export function rateLimited(ip) {
   if (now - b.day.start > 86_400_000) b.day = { start: now, count: 0 };
   b.minute.count += 1;
   b.day.count += 1;
-  return b.minute.count > PER_MINUTE || b.day.count > PER_DAY;
+  const limited = b.minute.count > PER_MINUTE || b.day.count > PER_DAY;
+  const retryAfter = limited
+    ? Math.max(1, Math.ceil((60_000 - (now - b.minute.start)) / 1000))
+    : 0;
+  return { limited, retryAfter };
+}
+// Sweep stale buckets on warm instances so the map can't grow without bound.
+if (!globalThis.__mojoBucketSweeper) {
+  const t = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, b] of buckets) {
+      if (now - b.day.start > 86_400_000 && now - b.minute.start > 3_600_000) buckets.delete(ip);
+    }
+  }, 600_000);
+  if (typeof t.unref === "function") t.unref();
+  globalThis.__mojoBucketSweeper = t;
 }
 
 export function buildMessages(body) {
   const messages = [{ role: "system", content: SYSTEM_PROMPT }];
-  const history = Array.isArray(body.history) ? body.history.slice(-20) : [];
+  const history = Array.isArray(body.history) ? body.history.slice(-MAX_HISTORY_ITEMS) : [];
   for (const m of history) {
     const role = String(m.role || "").toLowerCase();
     if (role !== "user" && role !== "assistant" && role !== "mojo" && role !== "jarvis") continue;
-    messages.push({
-      role: role === "user" ? "user" : "assistant",
-      content: String(m.text || m.content || "").slice(0, 4000),
-    });
+    const text = String(m.text || m.content || "").slice(0, MAX_MESSAGE_CHARS);
+    if (!text) continue;
+    messages.push({ role: role === "user" ? "user" : "assistant", content: text });
   }
-  const userText = String(body.message || "").slice(0, 4000);
+  const userText = String(body.message || "").slice(0, MAX_MESSAGE_CHARS);
   if (body.image && typeof body.image === "string" && body.image.startsWith("data:image")) {
     messages.push({
       role: "user",
       content: [
         { type: "text", text: userText || "Describe this image." },
-        { type: "image_url", image_url: { url: body.image.slice(0, 300_000) } },
+        { type: "image_url", image_url: { url: body.image.slice(0, MAX_IMAGE_CHARS) } },
       ],
     });
   } else {
@@ -61,22 +83,25 @@ export function buildMessages(body) {
   return messages;
 }
 
-export async function callProvider(messages, modelOverride) {
-  const r = await fetch(`${API_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${API_KEY}`,
-      "HTTP-Referer": "https://muse.ai",
-      "X-Title": "Mojo AI",
-    },
-    body: JSON.stringify({ model: modelOverride || MODEL, messages }),
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const err = new Error((data && data.error && data.error.message) || `provider HTTP ${r.status}`);
-    err.status = 502;
-    throw err;
-  }
-  return (data && data.choices && data.choices[0] && data.choices[0].message.content) || "";
+export function providerHeaders() {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${API_KEY}`,
+    "HTTP-Referer": "https://mojo-ai.vercel.app",
+    "X-Title": "Mojo AI",
+  };
+}
+
+// fetch() with a hard timeout so a hung provider can never hang the function.
+export function fetchWithTimeout(url, opts, ms) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, Object.assign({}, opts, { signal: ctrl.signal })).finally(() =>
+    clearTimeout(to)
+  );
+}
+
+// API responses are never cacheable.
+export function noStore(res) {
+  res.setHeader("Cache-Control", "no-store");
 }
