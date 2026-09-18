@@ -140,17 +140,69 @@ function initAmbient() {
   (function loop(t) { draw(t); requestAnimationFrame(loop); })(0);
 }
 
-/* ================= Holographic core ================= */
+/* ================= Holographic core : dotted globe ================= */
 const CORE_STATES = {
-  idle:      { speed: 0.28, glow: 0.65, pulse: 7,  blueMix: 0.30, ring: 1.0, label: "Idle" },
-  listening: { speed: 1.0,  glow: 1.0,  pulse: 13, blueMix: 0.85, ring: 1.5, label: "Listening" },
-  thinking:  { speed: 2.4,  glow: 1.0,  pulse: 9,  blueMix: 0.50, ring: 1.2, label: "Thinking" },
-  speaking:  { speed: 0.75, glow: 1.15, pulse: 17, blueMix: 0.38, ring: 1.9, label: "Speaking" }
+  idle:      { spin: 0.15, glow: 0.70, pulse: 6,  blueMix: 0.35, label: "Idle" },
+  listening: { spin: 0.55, glow: 1.00, pulse: 12, blueMix: 0.85, label: "Listening" },
+  thinking:  { spin: 1.15, glow: 1.00, pulse: 8,  blueMix: 0.55, label: "Thinking" },
+  speaking:  { spin: 0.35, glow: 1.15, pulse: 15, blueMix: 0.40, label: "Speaking" }
 };
-const coreParts = [];
-for (let i = 0; i < 150; i++) {
-  coreParts.push({ a: Math.random() * Math.PI * 2, rf: 0.55 + Math.random() * 1.05,
-    spd: 0.25 + Math.random() * 0.75, s: 0.7 + Math.random() * 1.9, blue: Math.random() < 0.32 });
+// Rough continent boxes [lonMin, lonMax, latMin, latMax], rasterized into globe dots.
+const LAND_BOXES = [
+  [-168,-140,60,71],[-140,-95,49,70],[-95,-55,46,62],[-125,-100,30,49],[-100,-67,25,47],
+  [-117,-87,16,32],[-92,-79,8,18],[-58,-20,60,84],
+  [-77,-50,-5,10],[-50,-35,-25,5],[-72,-60,-40,-5],[-73,-65,-55,-40],
+  [5,31,58,71],[-10,40,44,58],[-9,3,36,44],[-5,2,50,59],
+  [-10,35,18,35],[-18,-8,8,20],[-5,42,-5,18],[12,36,-35,-5],[43,51,-26,-12],
+  [40,180,52,75],[45,90,38,52],[35,60,15,38],[68,90,8,32],[90,122,22,45],
+  [95,108,8,22],[124,130,34,40],[129,146,31,46],[95,125,-10,6],[120,123,8,18],
+  [113,154,-39,-12],[166,179,-47,-34]
+];
+const globeDots = [];
+(function buildGlobeDots() {
+  const COLS = 72, ROWS = 36;
+  const landAt = (lon, lat) => {
+    for (const b of LAND_BOXES)
+      if (lon >= b[0] && lon <= b[1] && lat >= b[2] && lat <= b[3]) return true;
+    return false;
+  };
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const lon = -180 + (c + 0.5) * (360 / COLS);
+      const lat = 90 - (r + 0.5) * (180 / ROWS);
+      const land = landAt(lon, lat);
+      if (!land && Math.random() > 0.055) continue; // oceans: sparse dim dots
+      globeDots.push({
+        lon: lon + (Math.random() - 0.5) * 4.4,
+        lat: Math.max(-88, Math.min(88, lat + (Math.random() - 0.5) * 4.4)),
+        land: land,
+        blue: Math.random() < 0.30,
+        ph: Math.random() * 6.283,
+        s: land ? 0.8 + Math.random() * 1.4 : 0.5 + Math.random() * 0.7
+      });
+    }
+  }
+})();
+// Faint drifting binary-digit backdrop, rendered once to an offscreen strip.
+let binStrip = null, binStripH = 220;
+function buildBinStrip() {
+  const w = Math.max(2, Math.floor(coreW)), h = binStripH;
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  const c = cv.getContext("2d");
+  c.font = "9px ui-monospace, Menlo, monospace";
+  c.textBaseline = "top";
+  const cols = Math.max(6, Math.floor(w / 26));
+  for (let i = 0; i < cols; i++) {
+    const x = (i + 0.5) * (w / cols) + (Math.random() - 0.5) * 8;
+    const blue = Math.random() < 0.4;
+    for (let y = 6; y < h; y += 13) {
+      if (Math.random() < 0.28) continue;
+      c.fillStyle = blue ? "rgba(120,180,230,0.10)" : "rgba(230,150,70,0.10)";
+      c.fillText(Math.random() < 0.5 ? "0" : "1", x, y);
+    }
+  }
+  binStrip = cv;
 }
 let coreCtx = null, coreW = 0, coreH = 0;
 function sizeCore() {
@@ -160,6 +212,7 @@ function sizeCore() {
   coreW = Math.max(1, r.width); coreH = Math.max(1, r.height);
   cv.width = coreW * dpr; cv.height = coreH * dpr;
   coreCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  buildBinStrip();
 }
 function setCoreState(s) {
   coreState = CORE_STATES[s] ? s : "idle";
@@ -168,56 +221,132 @@ function setCoreState(s) {
 }
 function drawCore(t) {
   const ctx = coreCtx, p = CORE_STATES[coreState];
+  const al = (v) => Math.min(1, Math.max(0, v)).toFixed(3); // clamp alpha
   const cx = coreW / 2, cy = coreH / 2;
   const R = Math.min(coreW, coreH);
   ctx.clearRect(0, 0, coreW, coreH);
-  const baseR = Math.max(18, R * 0.30);
-  const pulseR = baseR + Math.sin(t * 2.2) * p.pulse * 0.45;
-  // Ambient halo
-  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * 3.4);
-  g.addColorStop(0, "rgba(255,150,50," + (0.50 * p.glow).toFixed(3) + ")");
-  g.addColorStop(0.35, "rgba(255,120,30," + (0.26 * p.glow).toFixed(3) + ")");
-  g.addColorStop(0.7, "rgba(120,190,255," + (0.20 * p.glow * p.blueMix).toFixed(3) + ")");
+  const sR = Math.max(24, R * 0.30); // globe radius
+  const breathe = 0.92 + 0.08 * Math.sin(t * 1.15);
+  const glow = p.glow * breathe;
+
+  // 1. Drifting binary-digit backdrop
+  if (binStrip) {
+    const off = (t * 10) % binStripH;
+    ctx.globalAlpha = 0.9;
+    for (let y = -off; y < coreH; y += binStripH) ctx.drawImage(binStrip, 0, y);
+    ctx.globalAlpha = 1;
+  }
+
+  // 2. Ambient aura
+  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, sR * 3.1);
+  g.addColorStop(0, "rgba(255,150,50," + al(0.34 * glow) + ")");
+  g.addColorStop(0.4, "rgba(255,120,30," + al(0.16 * glow) + ")");
+  g.addColorStop(0.7, "rgba(130,190,255," + al(0.14 * glow * (0.4 + p.blueMix)) + ")");
   g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, coreW, coreH);
-  // Pulsing center
-  const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, pulseR);
-  cg.addColorStop(0, "rgba(255,224,178,0.95)");
-  cg.addColorStop(0.4, "rgba(255,150,60,0.85)");
-  cg.addColorStop(1, "rgba(255,110,20,0)");
-  ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(cx, cy, pulseR, 0, 7); ctx.fill();
-  // Orbital rings
-  for (let i = 0; i < 2; i++) {
-    const rr = baseR * (1.75 + i * 0.6) * (0.55 + 0.45 * p.ring);
-    ctx.save(); ctx.translate(cx, cy);
-    ctx.rotate(t * p.speed * (i ? -0.7 : 0.9) + i * 1.3);
-    ctx.scale(1, 0.42);
-    ctx.strokeStyle = i ? "rgba(150,210,255," + (0.55 * p.glow).toFixed(3) + ")"
-                        : "rgba(255,150,60," + (0.60 * p.glow).toFixed(3) + ")";
-    ctx.lineWidth = i ? 1.4 : 2;
-    ctx.beginPath(); ctx.arc(0, 0, rr, 0, Math.PI * 2); ctx.stroke();
-    const na = t * p.speed * 2 * (i ? -1 : 1) + i;
-    ctx.fillStyle = i ? "rgba(170,220,255,0.95)" : "rgba(255,185,100,0.95)";
-    ctx.beginPath(); ctx.arc(Math.cos(na) * rr, Math.sin(na) * rr, 3, 0, 7); ctx.fill();
+
+  // 3. Tilted orbit ring (back half first, front half after the globe)
+  const ringR = sR * 1.22;
+  const strokeRing = (a0, a1, style, width, blur) => {
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(-0.30); ctx.scale(1, 0.30);
+    ctx.strokeStyle = style; ctx.lineWidth = width;
+    ctx.shadowColor = style; ctx.shadowBlur = blur;
+    ctx.beginPath(); ctx.arc(0, 0, ringR, a0, a1); ctx.stroke();
+    ctx.restore();
+  };
+  strokeRing(Math.PI, Math.PI * 2, "rgba(147,217,255," + al(0.45 * glow) + ")", 1.6, 8);
+
+  // 4. Outer HUD dial with tick marks + triangular markers (static frame)
+  const dialR = R * 0.47;
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.strokeStyle = "rgba(160,190,220," + al(0.16 * glow + 0.06) + ")";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(0, 0, dialR, 0, 7); ctx.stroke();
+  for (let i = 0; i < 72; i++) {
+    const a = (i / 72) * Math.PI * 2;
+    const big = i % 6 === 0;
+    const r1 = dialR - (big ? 9 : 5);
+    ctx.strokeStyle = "rgba(170,200,230," + al((big ? 0.34 : 0.18) * glow + 0.05) + ")";
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+    ctx.lineTo(Math.cos(a) * dialR, Math.sin(a) * dialR);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(255,150,60," + al(0.55 * glow) + ")";
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI / 4 + k * Math.PI / 2;
+    ctx.save();
+    ctx.translate(Math.cos(a) * dialR, Math.sin(a) * dialR);
+    ctx.rotate(a + Math.PI / 2);
+    ctx.beginPath(); ctx.moveTo(0, -5); ctx.lineTo(4, 4); ctx.lineTo(-4, 4);
+    ctx.closePath(); ctx.fill();
     ctx.restore();
   }
-  // Orbiting particles
-  for (const pt of coreParts) {
-    const ang = pt.a + t * pt.spd * p.speed;
-    const rad = pt.rf * baseR * 2.3 * (1 + 0.07 * Math.sin(t * 1.4 + pt.a * 3));
-    const x = cx + Math.cos(ang) * rad, y = cy + Math.sin(ang) * rad * 0.88;
-    const tw = 0.5 + 0.5 * Math.sin(t * 3 + pt.a * 5);
-    ctx.fillStyle = pt.blue ? "rgba(150,205,255," + (0.22 + 0.5 * tw * p.glow).toFixed(3) + ")"
-                            : "rgba(255,160,70," + (0.22 + 0.55 * tw * p.glow).toFixed(3) + ")";
-    ctx.beginPath(); ctx.arc(x, y, pt.s, 0, 7); ctx.fill();
+  ctx.restore();
+
+  // 5. Faint middle circle
+  ctx.strokeStyle = "rgba(150,190,230," + al(0.10 * glow + 0.04) + ")";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, sR * 1.55, 0, 7); ctx.stroke();
+
+  // 6. Glass globe body
+  const sg = ctx.createRadialGradient(cx - sR * 0.35, cy - sR * 0.35, sR * 0.1, cx, cy, sR);
+  sg.addColorStop(0, "rgba(30,38,54,0.95)");
+  sg.addColorStop(0.55, "rgba(13,17,26,0.96)");
+  sg.addColorStop(1, "rgba(6,8,13,0.98)");
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.arc(cx, cy, sR, 0, 7); ctx.fill();
+
+  // 7. Rotating dotted continents
+  const spin = t * p.spin, D2R = 0.0174533;
+  for (const d of globeDots) {
+    const lon = d.lon * D2R + spin, lat = d.lat * D2R;
+    const cl = Math.cos(lat);
+    const x3 = cl * Math.sin(lon), y3 = Math.sin(lat), z3 = cl * Math.cos(lon);
+    if (z3 <= 0.03) continue; // back hemisphere hidden
+    const tw = 0.62 + 0.38 * Math.sin(t * 2.6 + d.ph);
+    const depth = 0.25 + 0.75 * z3;
+    const a = d.land ? (0.55 + 0.45 * tw) * depth * glow : 0.16 * tw * depth * glow;
+    ctx.fillStyle = d.land
+      ? (d.blue ? "rgba(150,215,255," + al(a) + ")" : "rgba(255,178,90," + al(a) + ")")
+      : "rgba(120,150,190," + al(a) + ")";
+    const sz = d.s * (0.45 + 0.55 * z3);
+    ctx.beginPath();
+    ctx.arc(cx + x3 * sR * 0.94, cy - y3 * sR * 0.94, sz, 0, 7);
+    ctx.fill();
   }
-  // Speaking ripple rings
+
+  // 8. Fresnel rim light, brightest on the left limb
+  if (ctx.createConicGradient) {
+    const cg = ctx.createConicGradient(Math.PI, cx, cy);
+    cg.addColorStop(0, "rgba(255,170,80," + al(0.85 * glow) + ")");
+    cg.addColorStop(0.25, "rgba(255,140,50," + al(0.25 * glow) + ")");
+    cg.addColorStop(0.5, "rgba(140,200,255," + al(0.35 * glow) + ")");
+    cg.addColorStop(0.75, "rgba(120,170,230," + al(0.10 * glow) + ")");
+    cg.addColorStop(1, "rgba(255,170,80," + al(0.85 * glow) + ")");
+    ctx.strokeStyle = cg; ctx.lineWidth = 2.2;
+    ctx.shadowColor = "rgba(255,150,60,0.8)"; ctx.shadowBlur = 10 * glow;
+    ctx.beginPath(); ctx.arc(cx, cy, sR - 1, 0, 7); ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+  // soft top sheen
+  const sh = ctx.createLinearGradient(cx - sR, cy - sR, cx + sR * 0.3, cy + sR * 0.3);
+  sh.addColorStop(0, "rgba(255,255,255," + al(0.10 * glow) + ")");
+  sh.addColorStop(0.4, "rgba(255,255,255,0)");
+  ctx.fillStyle = sh;
+  ctx.beginPath(); ctx.arc(cx, cy, sR, 0, 7); ctx.fill();
+
+  // 9. Orbit ring front half (passes in front of the globe)
+  strokeRing(0, Math.PI, "rgba(160,220,255," + al(0.80 * glow) + ")", 2, 12);
+
+  // 10. Speaking ripple rings
   if (coreState === "speaking") {
     for (let i = 0; i < 2; i++) {
       const ph = (t * 0.9 + i * 0.5) % 1;
-      ctx.strokeStyle = "rgba(255,150,60," + ((1 - ph) * 0.5 * p.glow).toFixed(3) + ")";
+      ctx.strokeStyle = "rgba(255,150,60," + al((1 - ph) * 0.5 * glow) + ")";
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(cx, cy, baseR + ph * R * 0.55, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, sR + ph * (R * 0.40 + p.pulse), 0, 7); ctx.stroke();
     }
   }
 }
