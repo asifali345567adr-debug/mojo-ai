@@ -176,6 +176,7 @@ const globeDots = [];
         lon: lon + (Math.random() - 0.5) * 4.4,
         lat: Math.max(-88, Math.min(88, lat + (Math.random() - 0.5) * 4.4)),
         land: land,
+        hub: land && Math.random() < 0.05, // bright "city light" hubs
         blue: Math.random() < 0.30,
         ph: Math.random() * 6.283,
         s: land ? 0.8 + Math.random() * 1.4 : 0.5 + Math.random() * 0.7
@@ -217,7 +218,7 @@ function sizeCore() {
 function setCoreState(s) {
   coreState = CORE_STATES[s] ? s : "idle";
   const el = $("#coreStateLabel");
-  if (el) el.textContent = CORE_STATES[coreState].label;
+  if (el) el.textContent = "MOJO";
 }
 function drawCore(t) {
   const ctx = coreCtx, p = CORE_STATES[coreState];
@@ -244,6 +245,11 @@ function drawCore(t) {
   g.addColorStop(0.7, "rgba(130,190,255," + al(0.14 * glow * (0.4 + p.blueMix)) + ")");
   g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, coreW, coreH);
+  // Hot inner halo — the "lit from within" premium glow.
+  const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, sR * 1.9);
+  g2.addColorStop(0, "rgba(255,170,80," + al(0.20 * glow) + ")");
+  g2.addColorStop(1, "rgba(255,150,60,0)");
+  ctx.fillStyle = g2; ctx.fillRect(0, 0, coreW, coreH);
 
   // 3. Tilted orbit ring (back half first, front half after the globe)
   const ringR = sR * 1.22;
@@ -256,6 +262,34 @@ function drawCore(t) {
     ctx.restore();
   };
   strokeRing(Math.PI, Math.PI * 2, "rgba(147,217,255," + al(0.45 * glow) + ")", 1.6, 8);
+
+  // Thin dashed orbit ring, slow counter-rotation.
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(0.5); ctx.scale(1, 0.55);
+  ctx.strokeStyle = "rgba(255,170,90," + al(0.30 * glow) + ")";
+  ctx.lineWidth = 1; ctx.setLineDash([3, 7]); ctx.lineDashOffset = -t * 14;
+  ctx.beginPath(); ctx.arc(0, 0, sR * 1.38, 0, 7); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Orbiting satellites (back half dimmed behind the globe; front half drawn later).
+  const satAngle = (k) => t * p.spin * (0.35 + k * 0.12) * 4 + k * 2.1;
+  const satPos = (sa) => {
+    const rx = Math.cos(sa) * ringR, ry = Math.sin(sa) * ringR;
+    const ca = Math.cos(-0.30), sn = Math.sin(-0.30);
+    const sx = rx, sy = ry * 0.30;
+    return [cx + sx * ca - sy * sn, cy + sx * sn + sy * ca];
+  };
+  const drawSat = (sa, front) => {
+    const [x, y] = satPos(sa);
+    ctx.fillStyle = "rgba(190,228,255," + al((front ? 0.95 : 0.28) * glow) + ")";
+    ctx.shadowColor = "rgba(140,200,255,0.9)"; ctx.shadowBlur = front ? 9 : 0;
+    ctx.beginPath(); ctx.arc(x, y, front ? 2.4 : 1.6, 0, 7); ctx.fill();
+    ctx.shadowBlur = 0;
+  };
+  for (let k = 0; k < 3; k++) {
+    const sa = satAngle(k);
+    if (Math.sin(sa) < 0) drawSat(sa, false);
+  }
 
   // 4. Outer HUD dial with tick marks + triangular markers (static frame)
   const dialR = R * 0.47;
@@ -274,6 +308,7 @@ function drawCore(t) {
     ctx.stroke();
   }
   ctx.fillStyle = "rgba(255,150,60," + al(0.55 * glow) + ")";
+  ctx.shadowColor = "rgba(255,150,60,0.8)"; ctx.shadowBlur = 6;
   for (let k = 0; k < 4; k++) {
     const a = Math.PI / 4 + k * Math.PI / 2;
     ctx.save();
@@ -283,6 +318,7 @@ function drawCore(t) {
     ctx.closePath(); ctx.fill();
     ctx.restore();
   }
+  ctx.shadowBlur = 0;
   ctx.restore();
 
   // 5. Faint middle circle
@@ -307,7 +343,7 @@ function drawCore(t) {
     if (z3 <= 0.03) continue; // back hemisphere hidden
     const tw = 0.62 + 0.38 * Math.sin(t * 2.6 + d.ph);
     const depth = 0.25 + 0.75 * z3;
-    const a = d.land ? (0.55 + 0.45 * tw) * depth * glow : 0.16 * tw * depth * glow;
+    const a = d.land ? (0.68 + 0.32 * tw) * depth * glow : 0.16 * tw * depth * glow;
     ctx.fillStyle = d.land
       ? (d.blue ? "rgba(150,215,255," + al(a) + ")" : "rgba(255,178,90," + al(a) + ")")
       : "rgba(120,150,190," + al(a) + ")";
@@ -317,19 +353,41 @@ function drawCore(t) {
     ctx.fill();
   }
 
+  // Bright "city light" hubs on the continents — the premium sparkle.
+  for (const d of globeDots) {
+    if (!d.hub) continue;
+    const lon = d.lon * D2R + spin, lat = d.lat * D2R;
+    const cl = Math.cos(lat);
+    const x3 = cl * Math.sin(lon), y3 = Math.sin(lat), z3 = cl * Math.cos(lon);
+    if (z3 <= 0.15) continue;
+    const tw = 0.6 + 0.4 * Math.sin(t * 3.2 + d.ph * 2);
+    ctx.fillStyle = d.blue
+      ? "rgba(170,222,255," + al(0.9 * tw * glow) + ")"
+      : "rgba(255,205,130," + al(0.9 * tw * glow) + ")";
+    ctx.shadowColor = d.blue ? "rgba(140,200,255,0.9)" : "rgba(255,170,80,0.9)";
+    ctx.shadowBlur = 7;
+    ctx.beginPath(); ctx.arc(cx + x3 * sR * 0.94, cy - y3 * sR * 0.94, 2.1, 0, 7); ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+
   // 8. Fresnel rim light, brightest on the left limb
   if (ctx.createConicGradient) {
     const cg = ctx.createConicGradient(Math.PI, cx, cy);
-    cg.addColorStop(0, "rgba(255,170,80," + al(0.85 * glow) + ")");
-    cg.addColorStop(0.25, "rgba(255,140,50," + al(0.25 * glow) + ")");
-    cg.addColorStop(0.5, "rgba(140,200,255," + al(0.35 * glow) + ")");
-    cg.addColorStop(0.75, "rgba(120,170,230," + al(0.10 * glow) + ")");
-    cg.addColorStop(1, "rgba(255,170,80," + al(0.85 * glow) + ")");
-    ctx.strokeStyle = cg; ctx.lineWidth = 2.2;
-    ctx.shadowColor = "rgba(255,150,60,0.8)"; ctx.shadowBlur = 10 * glow;
+    cg.addColorStop(0, "rgba(255,170,80," + al(0.95 * glow) + ")");
+    cg.addColorStop(0.25, "rgba(255,140,50," + al(0.30 * glow) + ")");
+    cg.addColorStop(0.5, "rgba(140,200,255," + al(0.45 * glow) + ")");
+    cg.addColorStop(0.75, "rgba(120,170,230," + al(0.12 * glow) + ")");
+    cg.addColorStop(1, "rgba(255,170,80," + al(0.95 * glow) + ")");
+    ctx.strokeStyle = cg; ctx.lineWidth = 2.8;
+    ctx.shadowColor = "rgba(255,150,60,0.85)"; ctx.shadowBlur = 12 * glow;
     ctx.beginPath(); ctx.arc(cx, cy, sR - 1, 0, 7); ctx.stroke();
     ctx.shadowBlur = 0;
   }
+  // thin inner highlight just inside the rim
+  ctx.strokeStyle = "rgba(200,230,255," + al(0.35 * glow) + ")";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, sR - 4, 0, 7); ctx.stroke();
+
   // soft top sheen
   const sh = ctx.createLinearGradient(cx - sR, cy - sR, cx + sR * 0.3, cy + sR * 0.3);
   sh.addColorStop(0, "rgba(255,255,255," + al(0.10 * glow) + ")");
@@ -337,8 +395,35 @@ function drawCore(t) {
   ctx.fillStyle = sh;
   ctx.beginPath(); ctx.arc(cx, cy, sR, 0, 7); ctx.fill();
 
+  // Radar sweep — a soft scanner wedge circling the globe.
+  if (ctx.createConicGradient) {
+    const swA = (t * 0.9) % (Math.PI * 2);
+    const sw = ctx.createConicGradient(swA, cx, cy);
+    sw.addColorStop(0, "rgba(150,215,255," + al(0.22 * glow) + ")");
+    sw.addColorStop(0.10, "rgba(150,215,255," + al(0.05 * glow) + ")");
+    sw.addColorStop(0.25, "rgba(150,215,255,0)");
+    sw.addColorStop(1, "rgba(150,215,255,0)");
+    ctx.fillStyle = sw;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, sR, 0, 7); ctx.fill();
+  }
+
   // 9. Orbit ring front half (passes in front of the globe)
   strokeRing(0, Math.PI, "rgba(160,220,255," + al(0.80 * glow) + ")", 2, 12);
+
+  // 9b. Orbiting satellites (front half, full brightness).
+  for (let k = 0; k < 3; k++) {
+    const sa = satAngle(k);
+    if (Math.sin(sa) >= 0) drawSat(sa, true);
+  }
+
+  // 9c. Soft floor reflection beneath the globe.
+  ctx.save(); ctx.translate(cx, cy + sR * 1.04); ctx.scale(1, 0.26);
+  const rfl = ctx.createLinearGradient(0, -sR * 0.2, 0, sR * 1.1);
+  rfl.addColorStop(0, "rgba(255,150,70," + al(0.12 * glow) + ")");
+  rfl.addColorStop(1, "rgba(255,150,70,0)");
+  ctx.fillStyle = rfl;
+  ctx.beginPath(); ctx.arc(0, 0, sR * 0.85, 0, 7); ctx.fill();
+  ctx.restore();
 
   // 10. Speaking ripple rings
   if (coreState === "speaking") {
