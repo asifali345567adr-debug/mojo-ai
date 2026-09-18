@@ -732,34 +732,68 @@ function speak(text) {
   if (!("speechSynthesis" in window)) return;
   try {
     speechSynthesis.cancel();
-    ttsPending = "";
+    ttsSpokenUpTo = 0; ttsStreamText = "";
     const clean = String(text || "").replace(/```[\s\S]*?```/g, " (code block omitted) ").slice(0, 1500);
     if (clean.trim()) ttsEnqueue(clean);
   } catch (e) { /* TTS unavailable */ }
 }
 function stopSpeak() {
-  ttsPending = "";
+  ttsSpokenUpTo = 0; ttsStreamText = "";
   try { if ("speechSynthesis" in window) speechSynthesis.cancel(); } catch (e) {}
 }
 /* ---- Streaming TTS: speak each finished sentence the moment it arrives,
    so voice replies start instantly instead of waiting for the full answer.
-   Understands English and Urdu/Hindi sentence endings (. ! ? and ۔). ---- */
-let ttsPending = "";
-function speakStreamStart() { ttsPending = ""; }
+   Understands English and Urdu/Hindi sentence endings (. ! ? and ۔).
+   Every sentence is enqueued exactly once, in order — repeats are impossible
+   because we remember how far into the stream we have already spoken. ---- */
+let ttsSpokenUpTo = 0;
+let ttsStreamText = "";
+/* Words that end with a dot but never end a sentence (so "Mr. Smith" and
+   "3.5" are spoken as one unbroken line, not chopped in two). */
+const TTS_ABBR = /^(mr|mrs|ms|dr|st|sr|jr|prof|vs|etc|eg|ie)$/i;
+/* Pull complete sentences off the front of freshly streamed text.
+   Returns the sentences plus how many chars of the input were consumed. */
+function splitSpokenSentences(text) {
+  const sentences = [];
+  let start = 0, i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "." || ch === "!" || ch === "?" || ch === "۔") {
+      let j = i + 1;
+      while (j < text.length && (text[j] === "." || text[j] === "!" || text[j] === "?" || text[j] === "۔")) j++;
+      const before = text[i - 1] || "";
+      const afterCh = text[j] || "";
+      const isDecimal = /\d/.test(before) && /\d/.test(afterCh);
+      let isAbbr = false;
+      if (ch === "." && !isDecimal) {
+        const m = text.slice(0, i).match(/([A-Za-z]{1,4})$/);
+        if (m && TTS_ABBR.test(m[1])) isAbbr = true;
+      }
+      if (!isDecimal && !isAbbr && (afterCh === "" || /\s/.test(afterCh))) {
+        const s = text.slice(start, j).trim();
+        if (s) sentences.push(s);
+        start = j;
+        i = j;
+        continue;
+      }
+    }
+    i++;
+  }
+  return { sentences, consumed: start };
+}
+function speakStreamStart() { ttsSpokenUpTo = 0; ttsStreamText = ""; }
 function speakStreamChunk(fullText) {
   if (!settings.tts || !("speechSynthesis" in window)) return;
-  ttsPending = String(fullText || "");
-  const re = /(.+?[.!?۔])(\s+|$)/g;
-  let m, last = 0;
-  while ((m = re.exec(ttsPending))) {
-    ttsEnqueue(m[1]);
-    last = m.index + m[0].length;
-  }
-  if (last > 0) ttsPending = ttsPending.slice(last);
+  ttsStreamText = String(fullText || "");
+  // Only examine the part of the stream we have not spoken yet.
+  const fresh = ttsStreamText.slice(ttsSpokenUpTo);
+  const { sentences, consumed } = splitSpokenSentences(fresh);
+  for (const s of sentences) ttsEnqueue(s);
+  ttsSpokenUpTo += consumed;
 }
 function speakStreamEnd() {
-  const rest = ttsPending.trim();
-  ttsPending = "";
+  const rest = ttsStreamText.slice(ttsSpokenUpTo).trim();
+  ttsSpokenUpTo = ttsStreamText.length;
   if (rest.length > 1) ttsEnqueue(rest);
 }
 
