@@ -1,26 +1,49 @@
 # Mojo AI — Public Link Package (backend + web app)
 
-This package gives you **one public link with the brain inside**. The tiny
-Node server holds your API key **server-side** (the web page never sees it),
-answers `POST /api/chat`, **and serves the Mojo web app itself** — so a
-single free Render deploy produces your public Mojo link.
+This package gives you **one public link with the brain inside**. Your API
+key stays **server-side** (the web page never sees it), `POST /api/chat`
+answers with the model, and the Mojo web app is served from the same place.
+
+Two free hosting paths are supported — pick one:
+
+- **Vercel** (recommended — no credit card, instant): `api/` holds
+  serverless functions (`_lib.js` shared, `health.js`, `chat.js`); `public/`
+  is served as the static web app.
+- **Render**: `server.mjs` is the all-in-one Node server (serves API +
+  static app), deployed via the `render.yaml` Blueprint. Render now asks for
+  a credit card for identity verification.
 
 No dependencies. Plain Node.js 18+.
 
 ## Files
 
-- `server.mjs` — the server (Mojo-branded, per-IP rate limiting included)
+- `api/` — Vercel serverless functions (Mojo-branded, per-IP rate limiting)
+- `server.mjs` — the all-in-one Node server (Render / local runs)
 - `public/` — the Mojo web app (black/orange/light-blue, chat, voice, vision)
 - `render.yaml` — Render Blueprint for one-click deploy
 - `package.json` — start script for hosts like Render
 
-## Deploy free on Render (about 10 minutes)
+## Deploy free on Vercel (recommended, about 10 minutes, no card)
 
 1. Create a free account at **github.com** (or sign in with Google).
 2. On github.com → **New repository** → name it `mojo-ai` (Public) → Create.
 3. Extract this zip, then in the new repo click **Add file → Upload files**
-   and upload **everything**: `server.mjs`, `package.json`, `render.yaml`
-   **and the whole `public/` folder**. Commit.
+   and upload **everything**: `api/`, `server.mjs`, `package.json`,
+   `render.yaml` **and the whole `public/` folder**. Commit.
+4. Create a free account at **vercel.com** → Continue with GitHub.
+5. On vercel.com → **Add New… → Project** → Import the `mojo-ai` repo →
+   **Deploy**.
+6. After deploy: Project → **Settings → Environment Variables** → add
+   `AI_API_KEY` = your OpenRouter key from https://openrouter.ai/keys
+   (never share it) → **Save**, then **Redeploy** from the Deployments tab.
+7. **The project URL IS your public Mojo link** — e.g.
+   `https://mojo-ai.vercel.app`. Open it on any phone or browser. Check
+   `/api/health` on that URL to confirm the brain is connected
+   (`keyConfigured:true`).
+
+## Deploy free on Render (card required for verification)
+
+1–3. Same GitHub repo steps as above.
 4. Create a free account at **render.com** (or sign in with Google).
 5. On render.com → **New +** → **Blueprint** → connect your GitHub → select
    the `mojo-ai` repo.
