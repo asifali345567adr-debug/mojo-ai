@@ -41,13 +41,13 @@ export default async function handler(req, res) {
       .status(429)
       .json({ error: "RATE_LIMITED", detail: "Too many requests. Please wait a moment and try again." });
   }
-  if (!API_KEY) {
-    noStore(res);
-    return res.status(500).json({ error: "AI_CONNECTION_NOT_CONFIGURED" });
-  }
   // A personal key from the user's own device (X-Brain-Key header) takes
   // precedence over the server key for this request only.
   const activeKey = userKeyFromReq(req) || API_KEY;
+  if (!activeKey) {
+    noStore(res);
+    return res.status(500).json({ error: "AI_CONNECTION_NOT_CONFIGURED" });
+  }
 
   const userText = String(body.message || "").slice(0, MAX_MESSAGE_CHARS);
   const hasImage =
