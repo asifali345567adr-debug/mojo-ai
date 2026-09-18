@@ -186,6 +186,7 @@ body {
 
 /* ---------- Chat ---------- */
 #chatScroll { flex: 1; overflow-y: auto; padding: 26px 20px 10px; scroll-behavior: smooth; }
+#chatScroll.streaming { scroll-behavior: auto; } /* no smooth-scroll lag while tokens stream in */
 #messages { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; padding-bottom: 14px; }
 #messages:empty { display: none; }
 
@@ -305,6 +306,16 @@ body {
 .send-btn:hover:not(:disabled) { filter: brightness(1.08); }
 .send-btn:active:not(:disabled) { transform: scale(0.94); }
 .send-btn:disabled { opacity: 0.45; cursor: default; }
+/* While streaming, the send button becomes a stop button. */
+.send-btn.stop {
+  background: linear-gradient(135deg, #ff7a5c, #e5482f 55%, #b3271b);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(229, 72, 47, 0.45), inset 0 1px 0 rgba(255,255,255,0.3);
+}
+.send-btn.stop svg { display: none; }
+.send-btn.stop::after {
+  content: ""; width: 13px; height: 13px; border-radius: 3px; background: currentColor;
+}
 .composer-hint { max-width: 820px; margin: 8px auto 0; text-align: center; font-size: 11.5px; color: var(--faint); }
 
 /* ---------- Settings drawer ---------- */

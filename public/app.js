@@ -338,6 +338,7 @@ function renderSidebar(filter) {
   }
 }
 function openConversation(id) {
+  abortInflight();
   activeId = id;
   renderSidebar($("#searchInput").value);
   renderMessages();
@@ -368,6 +369,7 @@ function deleteConversation(id) {
   renderMessages();
 }
 function startNewChat() {
+  abortInflight();
   activeId = null;
   renderSidebar($("#searchInput").value);
   renderMessages();
@@ -376,7 +378,14 @@ function startNewChat() {
 }
 
 /* ================= Messages ================= */
-function scrollBottom() {
+function nearBottom() {
+  const sc = $("#chatScroll");
+  return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 140;
+}
+/* force !== false: always jump (new message). force === false: only autoscroll
+   when the user is already near the bottom, so reading history is never yanked. */
+function scrollBottom(force) {
+  if (force === false && !nearBottom()) return;
   const sc = $("#chatScroll");
   sc.scrollTop = sc.scrollHeight;
 }
@@ -472,10 +481,16 @@ function historyPayload(c) {
     .slice(-20)
     .map(m => ({ role: m.role, text: m.text || "" }));
 }
-/* Streams an SSE chat response into a live bubble; returns the full text. */
+/* Streams an SSE chat response into a live bubble.
+   Returns { text, bodyEl }. Rendering is throttled so long replies stay smooth,
+   and autoscroll never yanks the user away from history they are reading. */
 async function streamAssistantReply(res) {
+  const sc = $("#chatScroll");
+  sc.classList.add("streaming");
+  sc.setAttribute("aria-busy", "true");
   const bodyEl = appendMessageBubble("assistant", "", null, false);
   let acc = "";
+  let lastRender = 0;
   try {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -494,22 +509,41 @@ async function streamAssistantReply(res) {
         let delta = "";
         try {
           const j = JSON.parse(data);
+          if (j && j.error) continue; // provider-side error chunk; ignore it
           delta = (j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || "";
         } catch (e) { continue; }
         if (delta) {
           acc += delta;
-          bodyEl.innerHTML = renderMarkdown(acc);
-          scrollBottom();
+          const now = performance.now();
+          if (now - lastRender > 120) {
+            lastRender = now;
+            bodyEl.innerHTML = renderMarkdown(acc);
+            scrollBottom(false);
+          }
         }
       }
     }
     try { reader.releaseLock(); } catch (e) {}
   } catch (e) {
-    // stream interrupted; keep whatever arrived
+    // stream interrupted (user stopped, timed out, connection dropped); keep what arrived
   }
   bodyEl.innerHTML = renderMarkdown(acc);
-  scrollBottom();
-  return acc;
+  scrollBottom(false);
+  sc.classList.remove("streaming");
+  sc.removeAttribute("aria-busy");
+  return { text: acc, bodyEl };
+}
+/* In-flight request control: the send button becomes a stop button while streaming. */
+let sendAbort = null;
+let stopReason = null; // null | "stopped" | "timeout"
+const CHAT_TIMEOUT_MS = 75000;
+
+function stopCurrentSend() {
+  stopReason = "stopped";
+  if (sendAbort) { try { sendAbort.abort(); } catch (e) {} }
+}
+function abortInflight() {
+  if (sending) stopCurrentSend();
 }
 async function sendMessage(text) {
   text = (text || "").trim();
@@ -527,16 +561,26 @@ async function sendMessage(text) {
   $("#input").value = ""; autoresize();
   renderSidebar($("#searchInput").value);
   renderMessages();
-  sending = true; $("#sendBtn").disabled = true;
+  sending = true;
+  const sendBtn = $("#sendBtn");
+  sendBtn.classList.add("stop");
+  sendBtn.setAttribute("aria-label", "Stop generating");
   setCoreState("thinking");
   appendThinking();
   const payload = { message: userText, history: historyPayload(c) };
   if (img) payload.image = img;
+  sendAbort = new AbortController();
+  stopReason = null;
+  const chatTimer = setTimeout(() => {
+    stopReason = "timeout";
+    try { sendAbort.abort(); } catch (e) {}
+  }, CHAT_TIMEOUT_MS);
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: sendAbort.signal
     });
     const ct = res.headers.get("content-type") || "";
     if (!res.ok) {
@@ -545,12 +589,22 @@ async function sendMessage(text) {
       handleChatError(data.error, data.detail, res.status);
     } else if (ct.includes("text/event-stream") && res.body) {
       removeThinking();
-      const streamed = await streamAssistantReply(res);
-      const reply = streamed || "I didn't get a response. Please try again.";
-      c.messages.push({ role: "assistant", text: reply, ts: Date.now() });
-      c.updatedAt = Date.now(); saveConvs();
-      renderSidebar($("#searchInput").value);
-      speak(reply);
+      const { text: streamed, bodyEl } = await streamAssistantReply(res);
+      const row = bodyEl.closest(".msg");
+      if (stopReason === "stopped" && !streamed) {
+        if (row) row.remove(); // stopped before anything arrived: leave no trace
+      } else if ((stopReason === "timeout" || res.status === 504) && !streamed) {
+        if (row) row.remove();
+        handleChatError("AI_TIMEOUT", "", res.status);
+      } else {
+        const reply = streamed || "I didn't get a response. Please try again.";
+        bodyEl.innerHTML = renderMarkdown(reply);
+        scrollBottom(false);
+        c.messages.push({ role: "assistant", text: reply, ts: Date.now() });
+        c.updatedAt = Date.now(); saveConvs();
+        renderSidebar($("#searchInput").value);
+        if (c.id === activeId) speak(reply);
+      }
     } else {
       const data = await res.json().catch(() => ({}));
       removeThinking();
@@ -566,19 +620,29 @@ async function sendMessage(text) {
     }
   } catch (e) {
     removeThinking();
-    handleChatError("NETWORK", "", 0);
+    if (stopReason === "timeout") handleChatError("AI_TIMEOUT", "", 0);
+    else if (!(e && e.name === "AbortError")) handleChatError("NETWORK", "", 0);
+    /* user-pressed stop: stay silent, keep whatever already streamed */
   } finally {
-    sending = false; $("#sendBtn").disabled = false;
+    clearTimeout(chatTimer);
+    sendAbort = null; stopReason = null;
+    sending = false;
+    sendBtn.classList.remove("stop");
+    sendBtn.setAttribute("aria-label", "Send message");
     if (!listening) setCoreState("idle");
   }
 }
 function handleChatError(code, detail, status) {
   let msg;
   if (code === "AI_CONNECTION_NOT_CONFIGURED") {
-    msg = "The AI brain is not connected. Set AI_API_KEY on the server (Render dashboard → Environment), then refresh this page.";
+    msg = "The AI brain is not connected. Set AI_API_KEY on the server (Vercel dashboard → Project → Settings → Environment Variables), then refresh this page.";
     $("#keyBanner").hidden = false;
   } else if (code === "RATE_LIMITED") {
     msg = "Rate limited — too many requests. Please wait a moment and try again.";
+  } else if (code === "AI_TIMEOUT" || status === 504) {
+    msg = "The AI took too long to respond. Please try again.";
+  } else if (code === "IMAGE_TOO_LARGE") {
+    msg = "That image is too large. Please use a smaller image and try again.";
   } else if (code === "AI_CONNECTION_ERROR") {
     msg = "The AI provider returned an error" + (detail ? ": " + detail : ".") + " Please try again.";
   } else if (code === "NETWORK" || status === 0) {
@@ -673,7 +737,17 @@ function handleFile(file) {
     cv.width = w; cv.height = h;
     cv.getContext("2d").drawImage(img, 0, 0, w, h);
     URL.revokeObjectURL(url);
-    attachedImage = cv.toDataURL(file.type === "image/png" ? "image/png" : "image/jpeg", 0.85);
+    let dataUrl = cv.toDataURL(file.type === "image/png" ? "image/png" : "image/jpeg", 0.85);
+    if (dataUrl.length > 1400000) {
+      // Still too heavy for the API: shrink once more as JPEG.
+      const w2 = Math.max(1, Math.round(w * 0.7));
+      const h2 = Math.max(1, Math.round(h * 0.7));
+      const cv2 = document.createElement("canvas");
+      cv2.width = w2; cv2.height = h2;
+      cv2.getContext("2d").drawImage(cv, 0, 0, w2, h2);
+      dataUrl = cv2.toDataURL("image/jpeg", 0.8);
+    }
+    attachedImage = dataUrl;
     updateImgPreview();
     $("#input").focus();
   };
@@ -693,6 +767,7 @@ function autoresize() {
   ta.style.height = Math.min(160, ta.scrollHeight) + "px";
 }
 function submitFromComposer() {
+  if (sending) { stopCurrentSend(); return; } // send button doubles as stop while streaming
   sendMessage($("#input").value);
 }
 
