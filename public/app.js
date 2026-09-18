@@ -1,0 +1,732 @@
+/* Mojo — private AI command center frontend.
+   Vanilla JS. Same-origin API: GET /api/health, POST /api/chat.
+   No external network dependencies. */
+"use strict";
+
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+
+const LS_CONV = "mojo.conversations.v1";
+const LS_SETTINGS = "mojo.settings.v1";
+
+let conversations = [];
+let activeId = null;
+let settings = { voiceInput: true, tts: true };
+let attachedImage = null; // data URL
+let health = null;
+let sending = false;
+let coreState = "idle";
+let recognition = null;
+let listening = false;
+let voices = [];
+
+/* ================= Storage ================= */
+function saveConvs() {
+  try {
+    localStorage.setItem(LS_CONV, JSON.stringify(conversations));
+  } catch (e) {
+    // Quota (large images): retry with images stripped.
+    try {
+      const slim = conversations.map(c => Object.assign({}, c, {
+        messages: c.messages.map(m => Object.assign({}, m, { img: null }))
+      }));
+      localStorage.setItem(LS_CONV, JSON.stringify(slim));
+    } catch (e2) { /* give up silently */ }
+  }
+}
+function loadConvs() {
+  try {
+    const raw = localStorage.getItem(LS_CONV);
+    if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) conversations = p; }
+  } catch (e) { conversations = []; }
+}
+function saveSettings() { try { localStorage.setItem(LS_SETTINGS, JSON.stringify(settings)); } catch (e) {} }
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(LS_SETTINGS);
+    if (raw) settings = Object.assign({ voiceInput: true, tts: true }, JSON.parse(raw));
+  } catch (e) {}
+}
+
+/* ================= Conversations ================= */
+function getActive() { return conversations.find(c => c.id === activeId) || null; }
+function makeTitle(text) {
+  const t = (text || "").replace(/\s+/g, " ").trim();
+  return t.length > 44 ? t.slice(0, 44) + "…" : (t || "New conversation");
+}
+function createConversation() {
+  const c = { id: "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+              title: "New conversation", createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
+  conversations.unshift(c);
+  activeId = c.id;
+  return c;
+}
+function touchActive() {
+  const c = getActive();
+  if (c) { c.updatedAt = Date.now(); saveConvs(); }
+}
+function fmtDate(ts) {
+  try {
+    const d = new Date(ts), now = new Date();
+    if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  } catch (e) { return ""; }
+}
+
+/* ================= Safe markdown-lite ================= */
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function renderMarkdown(src) {
+  const blocks = [];
+  let t = String(src || "");
+  t = t.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
+    blocks.push('<pre class="code"><code>' + esc(code.replace(/\n$/, "")) + "</code></pre>");
+    return "\uE000" + (blocks.length - 1) + "\uE000";
+  });
+  t = esc(t);
+  t = t.replace(/`([^`\n]+)`/g, "<code class=\"inline\">$1</code>");
+  t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  t = t.replace(/(^|[\s(>])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  t = t.replace(/^### (.*)$/gm, "<h4>$1</h4>")
+       .replace(/^## (.*)$/gm, "<h3>$1</h3>")
+       .replace(/^# (.*)$/gm, "<h3>$1</h3>");
+  t = t.replace(/^(?:- |\* )(.*)$/gm, "<li>$1</li>");
+  t = t.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
+  t = t.replace(/\uE000(\d+)\uE000/g, (m, i) => blocks[+i] || "");
+  t = t.split(/\n{2,}/).map(block => {
+    return block
+      .replace(/(<pre[\s\S]*?<\/pre>|<ul>[\s\S]*?<\/ul>|<h[34]>[\s\S]*?<\/h[34]>)/g, "\u0001$1\u0001")
+      .split("\u0001").map(part => {
+        if (!part.trim()) return "";
+        if (/^\s*<(pre|ul|h3|h4)/.test(part)) return part;
+        return "<p>" + part.replace(/^\n+|\n+$/g, "").replace(/\n/g, "<br>") + "</p>";
+      }).join("");
+  }).join("");
+  return t;
+}
+
+/* ================= Ambient background ================= */
+function initAmbient() {
+  const cv = $("#ambient");
+  const ctx = cv.getContext("2d");
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let W = 0, H = 0;
+  const dots = [];
+  function size() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = innerWidth; H = innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  size(); addEventListener("resize", size);
+  for (let i = 0; i < 70; i++) {
+    dots.push({ x: Math.random(), y: Math.random(), s: 0.6 + Math.random() * 1.8,
+      vx: (Math.random() - 0.5) * 0.00012, vy: (Math.random() - 0.5) * 0.00012,
+      blue: Math.random() < 0.35, ph: Math.random() * 7 });
+  }
+  function draw(t) {
+    ctx.clearRect(0, 0, W, H);
+    for (const d of dots) {
+      d.x = (d.x + d.vx + 1) % 1; d.y = (d.y + d.vy + 1) % 1;
+      const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 0.0004 + d.ph));
+      ctx.fillStyle = d.blue ? "rgba(147,217,255," + (0.10 * tw).toFixed(3) + ")"
+                             : "rgba(255,150,60," + (0.13 * tw).toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(d.x * W, d.y * H, d.s, 0, 7); ctx.fill();
+    }
+  }
+  if (reduced) { draw(0); return; }
+  (function loop(t) { draw(t); requestAnimationFrame(loop); })(0);
+}
+
+/* ================= Holographic core ================= */
+const CORE_STATES = {
+  idle:      { speed: 0.28, glow: 0.65, pulse: 7,  blueMix: 0.30, ring: 1.0, label: "Idle" },
+  listening: { speed: 1.0,  glow: 1.0,  pulse: 13, blueMix: 0.85, ring: 1.5, label: "Listening" },
+  thinking:  { speed: 2.4,  glow: 1.0,  pulse: 9,  blueMix: 0.50, ring: 1.2, label: "Thinking" },
+  speaking:  { speed: 0.75, glow: 1.15, pulse: 17, blueMix: 0.38, ring: 1.9, label: "Speaking" }
+};
+const coreParts = [];
+for (let i = 0; i < 150; i++) {
+  coreParts.push({ a: Math.random() * Math.PI * 2, rf: 0.55 + Math.random() * 1.05,
+    spd: 0.25 + Math.random() * 0.75, s: 0.7 + Math.random() * 1.9, blue: Math.random() < 0.32 });
+}
+let coreCtx = null, coreW = 0, coreH = 0;
+function sizeCore() {
+  const cv = $("#core");
+  const r = cv.parentElement.getBoundingClientRect();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  coreW = Math.max(1, r.width); coreH = Math.max(1, r.height);
+  cv.width = coreW * dpr; cv.height = coreH * dpr;
+  coreCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function setCoreState(s) {
+  coreState = CORE_STATES[s] ? s : "idle";
+  const el = $("#coreStateLabel");
+  if (el) el.textContent = CORE_STATES[coreState].label;
+}
+function drawCore(t) {
+  const ctx = coreCtx, p = CORE_STATES[coreState];
+  const cx = coreW / 2, cy = coreH / 2;
+  const R = Math.min(coreW, coreH);
+  ctx.clearRect(0, 0, coreW, coreH);
+  const baseR = Math.max(18, R * 0.30);
+  const pulseR = baseR + Math.sin(t * 2.2) * p.pulse * 0.45;
+  // Ambient halo
+  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * 3.4);
+  g.addColorStop(0, "rgba(255,150,50," + (0.50 * p.glow).toFixed(3) + ")");
+  g.addColorStop(0.35, "rgba(255,120,30," + (0.26 * p.glow).toFixed(3) + ")");
+  g.addColorStop(0.7, "rgba(120,190,255," + (0.20 * p.glow * p.blueMix).toFixed(3) + ")");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, coreW, coreH);
+  // Pulsing center
+  const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, pulseR);
+  cg.addColorStop(0, "rgba(255,224,178,0.95)");
+  cg.addColorStop(0.4, "rgba(255,150,60,0.85)");
+  cg.addColorStop(1, "rgba(255,110,20,0)");
+  ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(cx, cy, pulseR, 0, 7); ctx.fill();
+  // Orbital rings
+  for (let i = 0; i < 2; i++) {
+    const rr = baseR * (1.75 + i * 0.6) * (0.55 + 0.45 * p.ring);
+    ctx.save(); ctx.translate(cx, cy);
+    ctx.rotate(t * p.speed * (i ? -0.7 : 0.9) + i * 1.3);
+    ctx.scale(1, 0.42);
+    ctx.strokeStyle = i ? "rgba(150,210,255," + (0.55 * p.glow).toFixed(3) + ")"
+                        : "rgba(255,150,60," + (0.60 * p.glow).toFixed(3) + ")";
+    ctx.lineWidth = i ? 1.4 : 2;
+    ctx.beginPath(); ctx.arc(0, 0, rr, 0, Math.PI * 2); ctx.stroke();
+    const na = t * p.speed * 2 * (i ? -1 : 1) + i;
+    ctx.fillStyle = i ? "rgba(170,220,255,0.95)" : "rgba(255,185,100,0.95)";
+    ctx.beginPath(); ctx.arc(Math.cos(na) * rr, Math.sin(na) * rr, 3, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  // Orbiting particles
+  for (const pt of coreParts) {
+    const ang = pt.a + t * pt.spd * p.speed;
+    const rad = pt.rf * baseR * 2.3 * (1 + 0.07 * Math.sin(t * 1.4 + pt.a * 3));
+    const x = cx + Math.cos(ang) * rad, y = cy + Math.sin(ang) * rad * 0.88;
+    const tw = 0.5 + 0.5 * Math.sin(t * 3 + pt.a * 5);
+    ctx.fillStyle = pt.blue ? "rgba(150,205,255," + (0.22 + 0.5 * tw * p.glow).toFixed(3) + ")"
+                            : "rgba(255,160,70," + (0.22 + 0.55 * tw * p.glow).toFixed(3) + ")";
+    ctx.beginPath(); ctx.arc(x, y, pt.s, 0, 7); ctx.fill();
+  }
+  // Speaking ripple rings
+  if (coreState === "speaking") {
+    for (let i = 0; i < 2; i++) {
+      const ph = (t * 0.9 + i * 0.5) % 1;
+      ctx.strokeStyle = "rgba(255,150,60," + ((1 - ph) * 0.5 * p.glow).toFixed(3) + ")";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, baseR + ph * R * 0.55, 0, 7); ctx.stroke();
+    }
+  }
+}
+function initCore() {
+  coreCtx = $("#core").getContext("2d");
+  sizeCore();
+  new ResizeObserver(sizeCore).observe($("#coreStage"));
+  addEventListener("resize", sizeCore);
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  setCoreState("idle");
+  if (reduced) { drawCore(0.6); return; }
+  let t = 0, last = performance.now();
+  (function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt;
+    drawCore(t);
+    requestAnimationFrame(frame);
+  })(last);
+}
+
+/* ================= Toast ================= */
+let toastTimer = null;
+function toast(msg) {
+  const el = $("#toast");
+  el.textContent = msg; el.hidden = false;
+  requestAnimationFrame(() => el.classList.add("show"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.remove("show"); setTimeout(() => { el.hidden = true; }, 300); }, 4200);
+}
+
+/* ================= Health / status ================= */
+async function refreshHealth() {
+  const notice = $("#coldNotice");
+  let slowFired = false;
+  const slow = setTimeout(() => { slowFired = true; notice.hidden = false; }, 4000);
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 95000);
+    const res = await fetch("/api/health", { signal: ctrl.signal });
+    clearTimeout(to);
+    health = await res.json();
+  } catch (e) {
+    health = { ok: false, offline: true };
+  } finally {
+    clearTimeout(slow);
+    notice.hidden = true;
+    renderStatus();
+  }
+}
+function renderStatus() {
+  const pill = $("#statusPill"), dot = $("#statusDot"), txt = $("#statusText");
+  const banner = $("#keyBanner");
+  pill.classList.remove("ok", "warn", "bad", "checking");
+  if (!health || health.offline) {
+    pill.classList.add("bad"); txt.textContent = "Server unreachable";
+    banner.hidden = true;
+  } else if (health.keyConfigured) {
+    pill.classList.add("ok"); txt.textContent = "Brain online";
+    banner.hidden = true;
+  } else {
+    pill.classList.add("warn"); txt.textContent = "Brain not connected";
+    banner.hidden = false;
+  }
+  $("#setServer").textContent = (!health || health.offline) ? "Unreachable" : "Online";
+  $("#setServer").className = "set-val " + ((!health || health.offline) ? "bad" : "good");
+  $("#setModel").textContent = (health && health.model) || "—";
+  const brain = $("#setBrain");
+  if (!health || health.offline) { brain.textContent = "Unknown"; brain.className = "set-val"; }
+  else if (health.keyConfigured) { brain.textContent = "Connected"; brain.className = "set-val good"; }
+  else { brain.textContent = "Not connected"; brain.className = "set-val bad"; }
+}
+
+/* ================= Sidebar ================= */
+function renderSidebar(filter) {
+  const list = $("#convList");
+  list.innerHTML = "";
+  const q = (filter || "").trim().toLowerCase();
+  const items = conversations.filter(c => {
+    if (!q) return true;
+    return c.title.toLowerCase().includes(q) ||
+      c.messages.some(m => (m.text || "").toLowerCase().includes(q));
+  });
+  if (!items.length) {
+    const d = document.createElement("div");
+    d.className = "conv-empty";
+    d.textContent = q ? "No conversations match your search." : "No conversations yet.\nStart a new chat below.";
+    list.appendChild(d);
+    return;
+  }
+  for (const c of items) {
+    const item = document.createElement("div");
+    item.className = "conv-item" + (c.id === activeId ? " active" : "");
+    const title = document.createElement("div");
+    title.className = "conv-title"; title.textContent = c.title; title.title = c.title;
+    const date = document.createElement("div");
+    date.className = "conv-date"; date.textContent = fmtDate(c.updatedAt);
+    const acts = document.createElement("div");
+    acts.className = "conv-act";
+    const rn = document.createElement("button");
+    rn.className = "mini-btn"; rn.type = "button"; rn.title = "Rename"; rn.setAttribute("aria-label", "Rename conversation");
+    rn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
+    rn.addEventListener("click", e => { e.stopPropagation(); renameConversation(c.id, title); });
+    const del = document.createElement("button");
+    del.className = "mini-btn danger"; del.type = "button"; del.title = "Delete"; del.setAttribute("aria-label", "Delete conversation");
+    del.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
+    del.addEventListener("click", e => { e.stopPropagation(); deleteConversation(c.id); });
+    acts.appendChild(rn); acts.appendChild(del);
+    item.appendChild(title); item.appendChild(date); item.appendChild(acts);
+    item.addEventListener("click", () => openConversation(c.id));
+    list.appendChild(item);
+  }
+}
+function openConversation(id) {
+  activeId = id;
+  renderSidebar($("#searchInput").value);
+  renderMessages();
+  closeMobileSidebar();
+}
+function renameConversation(id, titleEl) {
+  const c = conversations.find(x => x.id === id);
+  if (!c) return;
+  const input = document.createElement("input");
+  input.value = c.title; input.setAttribute("aria-label", "Conversation name");
+  titleEl.innerHTML = ""; titleEl.appendChild(input);
+  input.focus(); input.select();
+  const commit = () => {
+    const v = input.value.trim();
+    if (v) c.title = v;
+    saveConvs(); renderSidebar($("#searchInput").value);
+  };
+  input.addEventListener("keydown", e => { if (e.key === "Enter") commit(); if (e.key === "Escape") renderSidebar($("#searchInput").value); e.stopPropagation(); });
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", e => e.stopPropagation());
+}
+function deleteConversation(id) {
+  if (!confirm("Delete this conversation?")) return;
+  conversations = conversations.filter(c => c.id !== id);
+  if (activeId === id) activeId = null;
+  saveConvs();
+  renderSidebar($("#searchInput").value);
+  renderMessages();
+}
+function startNewChat() {
+  activeId = null;
+  renderSidebar($("#searchInput").value);
+  renderMessages();
+  $("#input").focus();
+  closeMobileSidebar();
+}
+
+/* ================= Messages ================= */
+function scrollBottom() {
+  const sc = $("#chatScroll");
+  sc.scrollTop = sc.scrollHeight;
+}
+function renderMessages() {
+  const wrap = $("#messages");
+  const empty = $("#emptyState");
+  const stage = $("#coreStage");
+  wrap.innerHTML = "";
+  const c = getActive();
+  const has = c && c.messages.length > 0;
+  empty.style.display = has ? "none" : "";
+  stage.classList.toggle("docked", !!has);
+  requestAnimationFrame(sizeCore);
+  if (!has) return;
+  for (const m of c.messages) {
+    if (m.role === "error") appendErrorBubble(m.text, false);
+    else appendMessageBubble(m.role, m.text, m.img, false);
+  }
+  scrollBottom();
+}
+function avatarFor(role) {
+  return role === "user" ? "YOU" : "M";
+}
+function appendMessageBubble(role, text, img, animate) {
+  const wrap = $("#messages");
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  const av = document.createElement("div");
+  av.className = "avatar"; av.textContent = avatarFor(role);
+  const bub = document.createElement("div");
+  bub.className = "bubble";
+  if (img) {
+    const im = document.createElement("img");
+    im.className = "msg-img"; im.src = img; im.alt = "Uploaded image";
+    bub.appendChild(im);
+  }
+  const body = document.createElement("div");
+  bub.appendChild(body);
+  div.appendChild(av); div.appendChild(bub);
+  wrap.appendChild(div);
+  if (animate && role === "assistant") {
+    typewriter(body, text || "", () => { scrollBottom(); });
+  } else {
+    body.innerHTML = renderMarkdown(text || "");
+  }
+  scrollBottom();
+  return body;
+}
+function appendErrorBubble(text, save) {
+  const wrap = $("#messages");
+  const div = document.createElement("div");
+  div.className = "msg error";
+  const bub = document.createElement("div");
+  bub.className = "bubble"; bub.textContent = text;
+  div.appendChild(bub); wrap.appendChild(div);
+  scrollBottom();
+}
+function appendThinking() {
+  const wrap = $("#messages");
+  const div = document.createElement("div");
+  div.className = "msg assistant"; div.id = "thinkingRow";
+  const av = document.createElement("div");
+  av.className = "avatar"; av.textContent = "M";
+  const dots = document.createElement("div");
+  dots.className = "thinking-dots";
+  dots.innerHTML = "<span></span><span></span><span></span>";
+  div.appendChild(av); div.appendChild(dots);
+  wrap.appendChild(div); scrollBottom();
+}
+function removeThinking() {
+  const t = $("#thinkingRow");
+  if (t) t.remove();
+}
+function typewriter(el, full, done) {
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduced || !full) { el.innerHTML = renderMarkdown(full); if (done) done(); return; }
+  let i = 0;
+  const step = Math.max(2, Math.round(full.length / 220));
+  (function tick() {
+    i += step;
+    const partial = full.slice(0, i);
+    el.innerHTML = renderMarkdown(partial);
+    scrollBottom();
+    if (i < full.length) requestAnimationFrame(tick);
+    else { el.innerHTML = renderMarkdown(full); if (done) done(); }
+  })();
+}
+
+/* ================= Chat send ================= */
+function historyPayload(c) {
+  return c.messages
+    .filter(m => m.role === "user" || m.role === "assistant")
+    .slice(-20)
+    .map(m => ({ role: m.role, text: m.text || "" }));
+}
+async function sendMessage(text) {
+  text = (text || "").trim();
+  if (sending) return;
+  if (!text && !attachedImage) return;
+  stopSpeak();
+  let c = getActive();
+  if (!c) { c = createConversation(); }
+  const img = attachedImage;
+  const userText = text;
+  c.messages.push({ role: "user", text: userText, img: img || null, ts: Date.now() });
+  if (c.messages.filter(m => m.role === "user").length === 1) c.title = makeTitle(userText || "Image");
+  c.updatedAt = Date.now(); saveConvs();
+  attachedImage = null; updateImgPreview();
+  $("#input").value = ""; autoresize();
+  renderSidebar($("#searchInput").value);
+  renderMessages();
+  sending = true; $("#sendBtn").disabled = true;
+  setCoreState("thinking");
+  appendThinking();
+  const payload = { message: userText, history: historyPayload(c) };
+  if (img) payload.image = img;
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    removeThinking();
+    if (!res.ok || data.error) {
+      handleChatError(data.error, data.detail, res.status);
+    } else {
+      const reply = data.reply || "I didn't get a response. Please try again.";
+      c.messages.push({ role: "assistant", text: reply, ts: Date.now() });
+      c.updatedAt = Date.now(); saveConvs();
+      appendMessageBubble("assistant", reply, null, true);
+      speak(reply);
+    }
+  } catch (e) {
+    removeThinking();
+    handleChatError("NETWORK", "", 0);
+  } finally {
+    sending = false; $("#sendBtn").disabled = false;
+    if (!listening) setCoreState("idle");
+  }
+}
+function handleChatError(code, detail, status) {
+  let msg;
+  if (code === "AI_CONNECTION_NOT_CONFIGURED") {
+    msg = "The AI brain is not connected. Set AI_API_KEY on the server (Render dashboard → Environment), then refresh this page.";
+    $("#keyBanner").hidden = false;
+  } else if (code === "RATE_LIMITED") {
+    msg = "Rate limited — too many requests. Please wait a moment and try again.";
+  } else if (code === "AI_CONNECTION_ERROR") {
+    msg = "The AI provider returned an error" + (detail ? ": " + detail : ".") + " Please try again.";
+  } else if (code === "NETWORK" || status === 0) {
+    msg = "Couldn't reach the server. Check your connection and try again.";
+  } else if (code === "empty_message") {
+    msg = "Please type a message or attach an image first.";
+  } else {
+    msg = "Something went wrong" + (detail ? ": " + detail : ".") + " Please try again.";
+  }
+  const c = getActive();
+  if (c) { c.messages.push({ role: "error", text: msg, ts: Date.now() }); saveConvs(); }
+  appendErrorBubble(msg);
+  setCoreState("idle");
+}
+
+/* ================= Voice input ================= */
+function toggleListening() {
+  if (!settings.voiceInput) { toast("Voice input is turned off in Settings."); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast("Voice input isn't supported in this browser. Try Chrome or Edge."); return; }
+  if (listening) { try { recognition.stop(); } catch (e) {} return; }
+  try {
+    recognition = new SR();
+    recognition.lang = navigator.language || "en-US";
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = e => {
+      let t = "";
+      for (const r of e.results) t += r[0].transcript;
+      $("#input").value = t; autoresize();
+    };
+    recognition.onerror = e => {
+      listening = false; $("#micBtn").classList.remove("live");
+      if (!sending) setCoreState("idle");
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") toast("Microphone access was denied. Allow it in your browser settings.");
+      else if (e.error !== "aborted" && e.error !== "no-speech") toast("Voice input had trouble starting. Please try again.");
+    };
+    recognition.onend = () => {
+      listening = false; $("#micBtn").classList.remove("live");
+      if (!sending) setCoreState("idle");
+    };
+    recognition.start();
+    listening = true;
+    $("#micBtn").classList.add("live");
+    setCoreState("listening");
+  } catch (e) {
+    toast("Voice input couldn't start on this device.");
+  }
+}
+
+/* ================= Text-to-speech ================= */
+function loadVoices() {
+  try { voices = speechSynthesis.getVoices() || []; } catch (e) { voices = []; }
+}
+function pickVoice() {
+  const en = voices.filter(v => /^en([-_]|$)/i.test(v.lang || ""));
+  const maleHints = /male|\b(david|daniel|james|mark|alex|fred|george|arthur|thomas|oliver|liam|noah|ryan|brian|christopher)\b/i;
+  return en.find(v => maleHints.test(v.name || "")) || en[0] || voices[0] || null;
+}
+function speak(text) {
+  if (!settings.tts) return;
+  if (!("speechSynthesis" in window)) return;
+  try {
+    speechSynthesis.cancel();
+    const clean = String(text || "").replace(/```[\s\S]*?```/g, " (code block omitted) ").slice(0, 1500);
+    if (!clean.trim()) return;
+    const u = new SpeechSynthesisUtterance(clean);
+    const v = pickVoice();
+    if (v) u.voice = v;
+    u.pitch = 0.85; u.rate = 1.0;
+    u.onstart = () => setCoreState("speaking");
+    u.onend = u.onerror = () => { if (!sending && !listening) setCoreState("idle"); };
+    speechSynthesis.speak(u);
+  } catch (e) { /* TTS unavailable */ }
+}
+function stopSpeak() {
+  try { if ("speechSynthesis" in window) speechSynthesis.cancel(); } catch (e) {}
+}
+
+/* ================= Image attach ================= */
+function handleFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith("image/")) { toast("Please choose an image file."); return; }
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const max = 1024;
+    const s = Math.min(1, max / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * s));
+    const h = Math.max(1, Math.round(img.height * s));
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    cv.getContext("2d").drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(url);
+    attachedImage = cv.toDataURL(file.type === "image/png" ? "image/png" : "image/jpeg", 0.85);
+    updateImgPreview();
+    $("#input").focus();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast("That image couldn't be read."); };
+  img.src = url;
+}
+function updateImgPreview() {
+  const box = $("#imgPreview");
+  if (attachedImage) { $("#imgPrevImg").src = attachedImage; box.hidden = false; }
+  else { box.hidden = true; $("#imgPrevImg").removeAttribute("src"); }
+}
+
+/* ================= Composer ================= */
+function autoresize() {
+  const ta = $("#input");
+  ta.style.height = "auto";
+  ta.style.height = Math.min(160, ta.scrollHeight) + "px";
+}
+function submitFromComposer() {
+  sendMessage($("#input").value);
+}
+
+/* ================= Sidebar / drawer (mobile) ================= */
+function closeMobileSidebar() {
+  $("#sidebar").classList.remove("open");
+  $("#scrim").classList.remove("open");
+}
+function openMobileSidebar() {
+  $("#sidebar").classList.add("open");
+  $("#scrim").classList.add("open");
+}
+function openDrawer() {
+  $("#settingsDrawer").classList.add("open");
+  $("#drawerScrim").classList.add("open");
+}
+function closeDrawer() {
+  $("#settingsDrawer").classList.remove("open");
+  $("#drawerScrim").classList.remove("open");
+}
+
+/* ================= Settings UI ================= */
+function applySettingsUI() {
+  $("#tglVoice").checked = !!settings.voiceInput;
+  $("#tglTTS").checked = !!settings.tts;
+}
+
+/* ================= Init ================= */
+function init() {
+  loadSettings();
+  loadConvs();
+  initAmbient();
+  initCore();
+  loadVoices();
+  if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = loadVoices;
+
+  applySettingsUI();
+  renderSidebar("");
+  renderMessages();
+  refreshHealth();
+
+  // Composer
+  $("#sendBtn").addEventListener("click", submitFromComposer);
+  $("#input").addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitFromComposer(); }
+  });
+  $("#input").addEventListener("input", autoresize);
+  autoresize();
+
+  // Image attach
+  $("#attachBtn").addEventListener("click", () => $("#fileInput").click());
+  $("#fileInput").addEventListener("change", e => { handleFile(e.target.files[0]); e.target.value = ""; });
+  $("#imgRemove").addEventListener("click", () => { attachedImage = null; updateImgPreview(); });
+
+  // Voice
+  $("#micBtn").addEventListener("click", toggleListening);
+
+  // Quick chips
+  $$(".chip").forEach(ch => ch.addEventListener("click", () => {
+    const ta = $("#input");
+    const prefix = ch.getAttribute("data-prefix") || "";
+    if (!ta.value.startsWith(prefix)) ta.value = prefix + ta.value;
+    autoresize(); ta.focus();
+  }));
+
+  // Suggestion cards
+  $$(".sugg").forEach(s => s.addEventListener("click", () => sendMessage(s.getAttribute("data-send") || "")));
+
+  // Sidebar
+  $("#newChatBtn").addEventListener("click", startNewChat);
+  $("#searchInput").addEventListener("input", e => renderSidebar(e.target.value));
+  $("#menuBtn").addEventListener("click", openMobileSidebar);
+  $("#scrim").addEventListener("click", closeMobileSidebar);
+
+  // Settings drawer
+  $("#settingsBtn").addEventListener("click", () => { renderStatus(); openDrawer(); });
+  $("#drawerClose").addEventListener("click", closeDrawer);
+  $("#drawerScrim").addEventListener("click", closeDrawer);
+  $("#refreshHealth").addEventListener("click", () => { refreshHealth(); toast("Checking server status…"); });
+  $("#tglVoice").addEventListener("change", e => { settings.voiceInput = e.target.checked; saveSettings(); });
+  $("#tglTTS").addEventListener("change", e => {
+    settings.tts = e.target.checked; saveSettings();
+    if (!settings.tts) stopSpeak();
+  });
+  $("#clearAll").addEventListener("click", () => {
+    if (!conversations.length) { toast("There are no conversations to delete."); return; }
+    if (!confirm("Delete ALL conversations? This cannot be undone.")) return;
+    conversations = []; activeId = null; saveConvs();
+    renderSidebar($("#searchInput").value); renderMessages();
+    toast("All conversations deleted.");
+  });
+
+  // Escape closes drawer / mobile sidebar
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") { closeDrawer(); closeMobileSidebar(); }
+  });
+}
+
+document.addEventListener("DOMContentLoaded", init);

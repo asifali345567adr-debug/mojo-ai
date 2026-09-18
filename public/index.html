@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050507">
+<meta name="description" content="Mojo — a private, server-backed AI command center.">
+<title>Mojo — Private AI Command Center</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<canvas id="ambient" aria-hidden="true"></canvas>
+
+<div id="app">
+  <!-- ============ SIDEBAR ============ -->
+  <aside id="sidebar" aria-label="Conversations">
+    <div class="side-head">
+      <div class="side-brand"><span class="brand-orb" aria-hidden="true"></span><span class="side-brand-name">MOJO</span></div>
+      <button id="newChatBtn" class="btn-primary" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        New chat
+      </button>
+      <label class="search-box">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="searchInput" type="search" placeholder="Search conversations" autocomplete="off" aria-label="Search conversations">
+      </label>
+    </div>
+    <nav id="convList" aria-label="Conversation history"></nav>
+    <div class="side-foot">Private · Server-backed · Mojo</div>
+  </aside>
+  <div id="scrim" aria-hidden="true"></div>
+
+  <!-- ============ MAIN ============ -->
+  <main id="main">
+    <header id="topbar">
+      <button id="menuBtn" class="icon-btn only-mobile" type="button" aria-label="Open conversations">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div id="brand"><span class="brand-orb" aria-hidden="true"></span><span class="brand-name">MOJO</span></div>
+      <div class="topbar-spacer"></div>
+      <div id="statusPill" class="checking" role="status">
+        <span id="statusDot" aria-hidden="true"></span><span id="statusText">Checking…</span>
+      </div>
+      <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </header>
+
+    <!-- Holographic core stage -->
+    <section id="coreStage" aria-hidden="true">
+      <canvas id="core"></canvas>
+      <div id="coreStateLabel">Idle</div>
+    </section>
+
+    <div id="keyBanner" class="banner warn" hidden>
+      <strong>Brain not connected.</strong>
+      <span>Set <code>AI_API_KEY</code> on the server (Render dashboard → Environment), then refresh.</span>
+    </div>
+    <div id="coldNotice" class="banner info" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span>Waking up the server — cold start can take ~30s. Hang tight.</span>
+    </div>
+
+    <section id="chatScroll" aria-live="polite">
+      <div id="emptyState">
+        <h1>How can I help?</h1>
+        <p class="empty-sub">Mojo is your private AI — running on your own server, answering only you.</p>
+        <div class="sugg-grid">
+          <button type="button" class="sugg" data-send="Explain quantum computing in simple terms.">
+            <span class="sugg-kicker">Learn</span>
+            <span class="sugg-title">Explain quantum computing in simple terms</span>
+          </button>
+          <button type="button" class="sugg" data-send="Write a haiku about the ocean at dawn.">
+            <span class="sugg-kicker">Create</span>
+            <span class="sugg-title">Write a haiku about the ocean at dawn</span>
+          </button>
+          <button type="button" class="sugg" data-send="Plan a focused 90-minute deep-work session for me.">
+            <span class="sugg-kicker">Plan</span>
+            <span class="sugg-title">Plan a focused 90-minute deep-work session</span>
+          </button>
+          <button type="button" class="sugg" data-send="Draft a polite follow-up email after a job interview.">
+            <span class="sugg-kicker">Write</span>
+            <span class="sugg-title">Draft a polite follow-up email after a job interview</span>
+          </button>
+        </div>
+      </div>
+      <div id="messages"></div>
+    </section>
+
+    <div id="chipsRow" role="toolbar" aria-label="Quick commands">
+      <button type="button" class="chip" data-prefix="Summarize: ">Summarize</button>
+      <button type="button" class="chip" data-prefix="Explain simply: ">Explain simply</button>
+      <button type="button" class="chip" data-prefix="Write formally: ">Write formally</button>
+      <button type="button" class="chip" data-prefix="Brainstorm ideas for: ">Brainstorm ideas</button>
+    </div>
+
+    <div id="composerWrap">
+      <div id="imgPreview" hidden>
+        <img id="imgPrevImg" alt="Attached image preview">
+        <button id="imgRemove" class="icon-btn sm" type="button" aria-label="Remove image">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="composer">
+        <input id="fileInput" type="file" accept="image/*" hidden>
+        <button id="attachBtn" class="icon-btn" type="button" aria-label="Attach an image">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        </button>
+        <textarea id="input" rows="1" placeholder="Ask Mojo anything…" aria-label="Message Mojo"></textarea>
+        <button id="micBtn" class="icon-btn" type="button" aria-label="Voice input">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></svg>
+        </button>
+        <button id="sendBtn" class="send-btn" type="button" aria-label="Send message">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+      <div class="composer-hint">Mojo answers privately from your server. Enter to send · Shift+Enter for a new line.</div>
+    </div>
+  </main>
+</div>
+
+<!-- ============ SETTINGS DRAWER ============ -->
+<div id="drawerScrim" aria-hidden="true"></div>
+<aside id="settingsDrawer" aria-label="Settings">
+  <div class="drawer-head">
+    <h2>Settings</h2>
+    <button id="drawerClose" class="icon-btn" type="button" aria-label="Close settings">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body">
+    <section class="set-group">
+      <h3>Connection</h3>
+      <div class="set-row"><span>Server</span><span id="setServer" class="set-val">Checking…</span></div>
+      <div class="set-row"><span>Model</span><span id="setModel" class="set-val mono">—</span></div>
+      <div class="set-row"><span>Brain</span><span id="setBrain" class="set-val">—</span></div>
+      <button id="refreshHealth" class="btn-ghost" type="button">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Refresh status
+      </button>
+    </section>
+    <section class="set-group">
+      <h3>Voice</h3>
+      <label class="set-row toggle">
+        <span>Voice input</span>
+        <input id="tglVoice" type="checkbox"><span class="switch" aria-hidden="true"></span>
+      </label>
+      <label class="set-row toggle">
+        <span>Speak replies aloud</span>
+        <input id="tglTTS" type="checkbox"><span class="switch" aria-hidden="true"></span>
+      </label>
+      <p class="set-note">Replies use a deeper male system voice when one is available.</p>
+    </section>
+    <section class="set-group">
+      <h3>Data</h3>
+      <button id="clearAll" class="btn-danger" type="button">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+        Delete all conversations
+      </button>
+    </section>
+    <p class="set-note">Mojo runs privately on your server. API keys live in server environment variables — never in this app.</p>
+  </div>
+</aside>
+
+<div id="toast" role="alert" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
