@@ -5,6 +5,8 @@ export const API_KEY =
   process.env.AI_API_KEY || process.env.OPENAI_API_KEY || "";
 export const API_URL = (process.env.AI_API_URL || "https://openrouter.ai/api/v1").replace(/\/$/, "");
 export const MODEL = process.env.AI_MODEL || "deepseek/deepseek-v4-flash-0731:free";
+// Used automatically when a message includes an image (MODEL can't read images).
+export const VISION_MODEL = process.env.AI_VISION_MODEL || "qwen/qwen3.8-27b:free";
 export const SYSTEM_PROMPT =
   process.env.AI_SYSTEM_PROMPT ||
   "You are Mojo, a precise and efficient AI assistant with dry wit. Address the user as sir. Keep answers concise unless detail is requested.";
