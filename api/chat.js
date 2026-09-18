@@ -3,6 +3,7 @@ import {
   API_URL,
   MODEL,
   VISION_MODEL,
+  VISION_FALLBACK_MODEL,
   MAX_MESSAGE_CHARS,
   MAX_IMAGE_CHARS,
   PROVIDER_TIMEOUT_MS,
@@ -58,7 +59,10 @@ export default async function handler(req, res) {
 
   // The model is chosen server-side only. Clients can never override it,
   // so nobody can point your key at a different (expensive) model.
-  const model = hasImage ? VISION_MODEL : MODEL;
+  // Vision requests get an automatic backup model: free vision providers go
+  // down often, so if the primary vision model errors we retry the same
+  // request on the fallback before the user ever sees an error.
+  const models = hasImage ? [VISION_MODEL, VISION_FALLBACK_MODEL] : [MODEL];
 
   // The provider call gets one overall deadline (PROVIDER_TIMEOUT_MS) that
   // covers the request plus any automatic retries of transient failures.
@@ -70,24 +74,31 @@ export default async function handler(req, res) {
     const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
     let out;
     try {
-      out = await providerPost(
-        `${API_URL}/chat/completions`,
-        { model, messages: buildMessages(body), stream: true },
-        controller.signal,
-        3
-      );
+      for (let i = 0; i < models.length; i++) {
+        out = await providerPost(
+          `${API_URL}/chat/completions`,
+          { model: models[i], messages: buildMessages(body), stream: true },
+          controller.signal,
+          i === 0 ? 3 : 2
+        );
+        if (out.ok) break;
+        if (controller.signal.aborted) break; // overall deadline hit: stop
+        const s = out.status || 0;
+        if (s !== 0 && s < 500 && s !== 429) break; // client error: final
+      }
     } finally {
       clearTimeout(timer);
     }
     if (!out.ok) {
       noStore(res);
-      const detail = out.detail || "The AI provider returned an error.";
-      if (/image/i.test(detail) && /no endpoints|not support/i.test(detail)) {
+      if (hasImage) {
         return res.status(502).json({
           error: "AI_CONNECTION_ERROR",
-          detail: "This model can't read images right now. Please try again.",
+          detail:
+            "The image reader is temporarily down on the provider's side. Please try again in a little while.",
         });
       }
+      const detail = out.detail || "The AI provider returned an error.";
       return res
         .status(502)
         .json({ error: "AI_CONNECTION_ERROR", detail });

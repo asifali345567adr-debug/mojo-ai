@@ -7,6 +7,11 @@ export const API_URL = (process.env.AI_API_URL || "https://openrouter.ai/api/v1"
 export const MODEL = process.env.AI_MODEL || "deepseek/deepseek-v4-flash-0731:free";
 // Used automatically when a message includes an image (MODEL can't read images).
 export const VISION_MODEL = process.env.AI_VISION_MODEL || "qwen/qwen3.8-27b:free";
+// Backup vision model: free providers go down often, so if the primary vision
+// model errors, the backend automatically retries on this one before the user
+// ever sees an error.
+export const VISION_FALLBACK_MODEL =
+  process.env.AI_VISION_FALLBACK_MODEL || "google/gemma-4-31b-it:free";
 export const SYSTEM_PROMPT =
   process.env.AI_SYSTEM_PROMPT ||
   "You are Mojo, a precise and efficient AI assistant with dry wit. Address the user as sir. Keep answers concise unless detail is requested.";

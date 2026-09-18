@@ -1,4 +1,4 @@
-import { API_KEY, MODEL, VISION_MODEL } from "./_lib.js";
+import { API_KEY, MODEL, VISION_MODEL, VISION_FALLBACK_MODEL } from "./_lib.js";
 
 export default function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -6,6 +6,7 @@ export default function handler(req, res) {
     ok: true,
     model: MODEL,
     visionModel: VISION_MODEL,
+    visionFallbackModel: VISION_FALLBACK_MODEL,
     keyConfigured: !!API_KEY,
     capabilities: ["stream", "vision", "warmup", "voice-input", "tts", "history"],
     time: new Date().toISOString(),
