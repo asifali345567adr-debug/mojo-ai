@@ -9,8 +9,7 @@ import {
   buildMessages,
   clientIp,
   rateLimited,
-  providerHeaders,
-  fetchWithTimeout,
+  providerPost,
   noStore,
 } from "./_lib.js";
 
@@ -61,17 +60,39 @@ export default async function handler(req, res) {
   // so nobody can point your key at a different (expensive) model.
   const model = hasImage ? VISION_MODEL : MODEL;
 
+  // The provider call gets one overall deadline (PROVIDER_TIMEOUT_MS) that
+  // covers the request plus any automatic retries of transient failures.
+  // Once the stream's headers arrive, the timer is cleared and the stream
+  // phase runs untimed, exactly as before.
   let upstream;
   try {
-    upstream = await fetchWithTimeout(
-      `${API_URL}/chat/completions`,
-      {
-        method: "POST",
-        headers: providerHeaders(),
-        body: JSON.stringify({ model, messages: buildMessages(body), stream: true }),
-      },
-      PROVIDER_TIMEOUT_MS
-    );
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+    let out;
+    try {
+      out = await providerPost(
+        `${API_URL}/chat/completions`,
+        { model, messages: buildMessages(body), stream: true },
+        controller.signal,
+        3
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!out.ok) {
+      noStore(res);
+      const detail = out.detail || "The AI provider returned an error.";
+      if (/image/i.test(detail) && /no endpoints|not support/i.test(detail)) {
+        return res.status(502).json({
+          error: "AI_CONNECTION_ERROR",
+          detail: "This model can't read images right now. Please try again.",
+        });
+      }
+      return res
+        .status(502)
+        .json({ error: "AI_CONNECTION_ERROR", detail });
+    }
+    upstream = out.resp;
   } catch (e) {
     noStore(res);
     const timedOut = e && e.name === "AbortError";
@@ -81,23 +102,6 @@ export default async function handler(req, res) {
         ? "The AI provider took too long to respond. Please try again."
         : "Couldn't reach the AI provider. Please try again.",
     });
-  }
-
-  if (!upstream.ok || !upstream.body) {
-    const data = await upstream.json().catch(() => ({}));
-    const detail = String(
-      (data && data.error && data.error.message) || `provider HTTP ${upstream.status}`
-    );
-    noStore(res);
-    if (/image/i.test(detail) && /no endpoints|not support/i.test(detail)) {
-      return res.status(502).json({
-        error: "AI_CONNECTION_ERROR",
-        detail: "This model can't read images right now. Please try again.",
-      });
-    }
-    return res
-      .status(502)
-      .json({ error: "AI_CONNECTION_ERROR", detail: detail.slice(0, 200) });
   }
 
   // Stream the provider's SSE straight through so words appear instantly.

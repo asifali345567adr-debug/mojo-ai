@@ -101,6 +101,52 @@ export function fetchWithTimeout(url, opts, ms) {
   );
 }
 
+// POST to the provider, automatically retrying transient failures.
+// A brief upstream hiccup (HTTP 5xx or a network error — e.g. OpenRouter's
+// "Provider returned error") is retried up to `attempts` times with backoff
+// before we ever bother the user about it. Client errors (4xx) are final and
+// are never retried. `signal` should carry an overall deadline; retries share
+// whatever budget is left.
+export async function providerPost(url, bodyObj, signal, attempts = 3) {
+  const payload = JSON.stringify(bodyObj);
+  let lastStatus = 0;
+  let lastErrText = "";
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (signal && signal.aborted) {
+      const e = new Error("aborted");
+      e.name = "AbortError";
+      throw e;
+    }
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: providerHeaders(),
+        body: payload,
+        signal: signal || undefined,
+      });
+      if (resp.ok) return { ok: true, resp };
+      lastStatus = resp.status;
+      lastErrText = await resp.text().catch(() => "");
+      try {
+        if (resp.body && resp.body.cancel) await resp.body.cancel();
+      } catch (e) {}
+      if (resp.status < 500 || attempt === attempts) break;
+    } catch (e) {
+      if (e && e.name === "AbortError") throw e;
+      lastStatus = 0;
+      if (attempt === attempts) break;
+    }
+    await new Promise((r) => setTimeout(r, attempt * 1200));
+  }
+  let detail = lastErrText;
+  try {
+    const data = JSON.parse(lastErrText);
+    if (data && data.error && data.error.message) detail = String(data.error.message);
+  } catch (e) {}
+  detail = String(detail || "").slice(0, 200);
+  return { ok: false, status: lastStatus, detail: detail || `provider HTTP ${lastStatus}` };
+}
+
 // API responses are never cacheable.
 export function noStore(res) {
   res.setHeader("Cache-Control", "no-store");
