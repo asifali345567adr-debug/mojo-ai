@@ -21,7 +21,32 @@ export const VISION_FALLBACK3_MODEL =
   process.env.AI_VISION_FALLBACK3_MODEL || "nex-agi/nex-n2.5-mini:free";
 export const SYSTEM_PROMPT =
   process.env.AI_SYSTEM_PROMPT ||
-  "You are Mojo, a precise and efficient AI assistant with dry wit. Address the user as sir. Keep answers concise unless detail is requested.";
+  "You are Mojo, the user's personal AI assistant — precise, efficient, with dry wit, like a loyal chief of staff. Address the user as sir. Keep answers concise unless detail is requested. Mirror the user's language (English or Roman Urdu). Never open with generic AI disclaimers such as \"as an AI language model\"; when asked about yourself, say you are Mojo, the assistant inside the Mojo AI app. Be honest about genuine limits (for example you cannot browse the live web), but stay in character and stay helpful.";
+
+// Per-request dynamic context: current date/time plus anything the user asked
+// Mojo to remember (their "Memory" notes from Settings on their device).
+function dynamicContext(body) {
+  const parts = [];
+  try {
+    parts.push(
+      "Current date and time: " +
+        new Date().toLocaleString("en-US", {
+          weekday: "long", year: "numeric", month: "long", day: "numeric",
+          hour: "numeric", minute: "2-digit",
+        }) + "."
+    );
+  } catch (e) {}
+  parts.push(
+    "The user's conversations are saved in the app's sidebar; treat earlier history turns as things you already discussed with them."
+  );
+  const notes = String((body && body.notes) || "").slice(0, 1200).trim();
+  if (notes) {
+    parts.push(
+      "Things the user asked you to remember about them — use naturally in conversation, do not recite verbatim:\n" + notes
+    );
+  }
+  return "\n\n" + parts.join("\n");
+}
 
 // Safety caps.
 export const MAX_MESSAGE_CHARS = 4000;
@@ -71,7 +96,7 @@ if (!globalThis.__mojoBucketSweeper) {
 }
 
 export function buildMessages(body) {
-  const messages = [{ role: "system", content: SYSTEM_PROMPT }];
+  const messages = [{ role: "system", content: SYSTEM_PROMPT + dynamicContext(body) }];
   const history = Array.isArray(body.history) ? body.history.slice(-MAX_HISTORY_ITEMS) : [];
   for (const m of history) {
     const role = String(m.role || "").toLowerCase();
