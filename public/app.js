@@ -174,12 +174,12 @@ function renderTools() {
     list.appendChild(b);
   }
 }
-/* Slim icon rail at the left edge, shown when the sidebar is closed on
-   desktop: the attached tool icons stay one tap away, like the library. */
+/* Persistent rail at the left edge (desktop and mobile, sidebar open or closed):
+   the attached tool icons stay one tap away, like the library. */
 function renderToolRail() {
-  const rail = $("#toolRail");
-  if (!rail) return;
-  rail.innerHTML = "";
+  const box = $("#railTools");
+  if (!box) return;
+  box.innerHTML = "";
   for (const t of tools) {
     const b = document.createElement("button");
     b.type = "button";
@@ -188,16 +188,8 @@ function renderToolRail() {
     b.title = "Command " + t.name + " (@" + toolCmdName(t) + ")";
     b.setAttribute("aria-label", "Command " + t.name);
     b.addEventListener("click", () => prefillTool(t));
-    rail.appendChild(b);
+    box.appendChild(b);
   }
-  const add = document.createElement("button");
-  add.type = "button";
-  add.className = "rail-tool rail-add";
-  add.textContent = "+";
-  add.title = "Attach a tool";
-  add.setAttribute("aria-label", "Attach a tool");
-  add.addEventListener("click", openToolModal);
-  rail.appendChild(add);
 }
 /* Puts "@tool " into the composer so the next message commands that tool. */
 function prefillTool(t) {
@@ -1700,6 +1692,8 @@ function init() {
 
   // Attached tools
   $("#attachToolBtn").addEventListener("click", openToolModal);
+  const railNew = $("#railNewChat"); if (railNew) railNew.addEventListener("click", startNewChat);
+  const railAdd = $("#railAdd"); if (railAdd) railAdd.addEventListener("click", openToolModal);
   $("#toolModalClose").addEventListener("click", closeToolModal);
   $("#toolModalCancel").addEventListener("click", closeToolModal);
   $("#toolModal").addEventListener("click", e => { if (e.target.id === "toolModal") closeToolModal(); });

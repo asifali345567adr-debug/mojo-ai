@@ -46,7 +46,8 @@ body {
 }
 /* Desktop: click the menu button to collapse / open the side chat. */
 @media (min-width: 901px) {
-  #app.side-collapsed #sidebar { margin-left: calc(-300px - 52px); } /* -sidebar width - rail width: no sliver peeks out */
+  /* Desktop: click the menu button to collapse / open the side chat.
+     The sidebar hides behind the always-visible tool rail. */
 }
 #sidebar.dragging { transition: none; }
 .side-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 10px; }
@@ -555,38 +556,41 @@ textarea.text-input { resize: vertical; min-height: 66px; line-height: 1.5; font
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
 .modal-actions .btn-primary { width: auto; padding: 10px 18px; }
 
-/* ---------- Tool icon rail: attached tool icons stay visible when the sidebar is closed ---------- */
+/* ---------- Tool icon rail: always-visible premium rail, sidebar open or closed ---------- */
 #toolRail {
-  display: none;
-  flex-direction: column; align-items: center; gap: 8px;
-  background: var(--panel); border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column; align-items: center;
+  width: 64px; flex: 0 0 64px;
+  padding: 12px 8px; gap: 8px;
+  background: linear-gradient(180deg, #17171a 0%, #121214 100%);
+  border-right: 1px solid var(--border);
+  position: relative; z-index: 6; /* paints above the collapsed sidebar, never under it */
+}
+.rail-logo { width: 36px; height: 36px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); flex: 0 0 36px; }
+.rail-div { width: 26px; height: 1px; background: rgba(255,255,255,0.14); margin: 2px 0; flex: 0 0 auto; }
+#railTools { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.rail-tool {
+  width: 42px; height: 42px; border-radius: 13px; cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--ink); color: #f2f2f4; font-size: 18px; font-weight: 650;
+  border: 1px solid transparent; font-family: var(--font);
+  transition: transform 0.15s ease, border-color 0.2s ease, background 0.2s ease;
+}
+.rail-tool:hover { border-color: rgba(255,255,255,0.28); transform: translateY(-1px); }
+.rail-tool:active { transform: scale(0.96); }
+.rail-action { background: #26262b; color: #e8e8ea; }
+.rail-add {
+  background: transparent; color: rgba(255,255,255,0.55); font-size: 24px; line-height: 1;
+  border: 1px dashed rgba(255,255,255,0.25);
+}
+.rail-add:hover { color: #fff; border-color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.06); }
+@media (max-width: 900px) {
+  /* Mobile: the rail stays at the left edge at all times; the open drawer slides over it. */
+  #toolRail { width: 56px; flex-basis: 56px; padding: 10px 6px; }
+  .rail-logo { width: 32px; height: 32px; flex-basis: 32px; }
+  .rail-tool { width: 38px; height: 38px; font-size: 17px; border-radius: 12px; }
 }
 @media (min-width: 901px) {
-  /* Desktop: rail replaces the collapsed sidebar at the left edge. */
-  #app.side-collapsed #toolRail {
-    display: flex;
-    width: 52px; flex: 0 0 52px; padding: 14px 6px;
-  }
-}
-@media (max-width: 900px) {
-  /* Mobile: rail is always at the left edge; the open drawer slides over it. */
-  #toolRail {
-    display: flex;
-    width: 44px; flex: 0 0 44px; padding: 12px 4px;
-  }
-}
-.rail-tool {
-  width: 38px; height: 38px; border-radius: 11px; cursor: pointer; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: var(--ink); color: #f2f2f4; font-size: 17px; font-weight: 650;
-  border: 1px solid transparent; font-family: var(--font);
-}
-.rail-tool:hover { border-color: var(--border-strong); }
-.rail-add {
-  background: transparent; color: var(--muted); font-size: 22px; line-height: 1;
-  border: 1px dashed var(--border-strong);
-}
-.rail-add:hover { color: var(--ink); border-color: var(--ink); background: #c9cad0; }
-@media (max-width: 900px) {
-  .rail-tool { width: 34px; height: 34px; font-size: 16px; border-radius: 10px; }
+  /* Desktop: the collapsed sidebar hides behind the always-visible rail. */
+  #app.side-collapsed #sidebar { margin-left: -300px; }
 }
