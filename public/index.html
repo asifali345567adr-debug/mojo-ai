@@ -19,12 +19,15 @@
   <div id="toolRail" aria-label="Tools rail">
     <img class="rail-logo" src="logo-badge.png" alt="Mojo" width="36" height="36">
     <span class="rail-div" aria-hidden="true"></span>
-    <button id="railNewChat" class="rail-tool rail-action" type="button" title="New chat" aria-label="New chat">
+    <button id="railNewChat" class="rail-tool rail-action" type="button" data-label="New chat" aria-label="New chat">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
     </button>
     <span class="rail-div" aria-hidden="true"></span>
+    <button id="railResearch" class="rail-tool rail-research" type="button" data-label="Research the web" aria-label="Research the web">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    </button>
     <div id="railTools" aria-label="Attached tools"></div>
-    <button id="railAdd" class="rail-tool rail-add" type="button" title="Attach a tool" aria-label="Attach a tool">+</button>
+    <button id="railAdd" class="rail-tool rail-add" type="button" data-label="Attach a tool" aria-label="Attach a tool">+</button>
   </div>
   <!-- ============ SIDEBAR ============ -->
   <aside id="sidebar" aria-label="Conversations">
@@ -42,12 +45,28 @@
     <nav id="convList" aria-label="Conversation history"></nav>
     <section id="toolsSection" aria-label="Attached tools">
       <div class="tools-head"><span>My tools</span><span id="toolsCount" class="tools-count"></span></div>
+      <button id="researchSideBtn" class="tool-item tool-research" type="button" title="Research the web — or type @research in chat">
+        <span class="tool-icon research-icon">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        </span>
+        <span class="tool-name">Research</span>
+        <span class="tool-badge">web</span>
+      </button>
       <div id="toolList"></div>
       <button id="attachToolBtn" class="tool-add" type="button">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         Attach a tool
       </button>
       <p class="tools-note">Attach your own AI tools — Grok, ChatGPT, Gemini, DeepSeek, Mistral, Perplexity and more — with your own key. Type <code>@tool</code> in chat to command it.</p>
+    </section>
+    <section id="brainSection" aria-label="Personal brain">
+      <div class="tools-head"><span>Personal brain</span><span id="sideBrainDot" class="brain-dot" title="Key status"></span></div>
+      <input id="sideBrainKeyInput" type="password" class="text-input brain-input" placeholder="sk-or-… (OpenRouter key)" autocomplete="off" spellcheck="false" aria-label="Personal brain API key">
+      <div class="brain-btns">
+        <button id="sideSaveBrainKey" class="btn-ghost" type="button">Save key</button>
+        <button id="sideRemoveBrainKey" class="btn-ghost" type="button">Remove</button>
+      </div>
+      <p id="sideBrainNote" class="tools-note">Saved only in this browser. When set, your key powers Mojo's brain on this device.</p>
     </section>
     <div class="side-foot">Private · Server-backed · Mojo</div>
   </aside>
@@ -159,7 +178,6 @@
     <section class="set-group">
       <h3>Connection</h3>
       <div class="set-row"><span>Server</span><span id="setServer" class="set-val">Checking…</span></div>
-      <div class="set-row"><span>Model</span><span id="setModel" class="set-val mono">—</span></div>
       <div class="set-row"><span>Brain</span><span id="setBrain" class="set-val">—</span></div>
       <div class="set-key-block">
         <label for="brainKeyInput" class="set-key-label">Personal brain key</label>
@@ -263,6 +281,50 @@
     <div class="modal-actions">
       <button id="toolModalCancel" class="btn-ghost" type="button">Cancel</button>
       <button id="toolAttach" class="btn-primary" type="button">Attach tool</button>
+    </div>
+  </div>
+</div>
+
+<!-- Research: connect your own free Brave Search key -->
+<div id="researchKeyModal" class="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="researchKeyTitle">
+    <div class="modal-head">
+      <h2 id="researchKeyTitle">Research key</h2>
+      <button id="researchKeyClose" class="icon-btn" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p class="modal-sub">Research uses <strong>your own free Brave Search key</strong> (2,000 searches/month free). Get one at <a href="https://brave.com/search/api/" target="_blank" rel="noopener">brave.com/search/api</a> — it takes a minute. The key is stored <strong>only in this browser</strong>; Mojo never keeps it.</p>
+    <label class="field">
+      <span>Brave Search API key</span>
+      <input id="researchKeyInput" class="text-input mono" type="password" placeholder="BSA…" autocomplete="off" spellcheck="false">
+    </label>
+    <p id="researchKeyErr" class="field-err" hidden></p>
+    <div class="modal-actions">
+      <button id="researchKeyCancel" class="btn-ghost" type="button">Cancel</button>
+      <button id="researchKeySave" class="btn-primary" type="button">Save key</button>
+    </div>
+  </div>
+</div>
+
+<!-- Research: ask, then get a sourced brief -->
+<div id="researchModal" class="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="researchTitle">
+    <div class="modal-head">
+      <h2 id="researchTitle">Research</h2>
+      <button id="researchClose" class="icon-btn" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p class="modal-sub">Ask anything — Mojo searches the live web and writes you a sourced brief. You can also type <code>@research</code> in chat.</p>
+    <label class="field">
+      <span>What should I research?</span>
+      <input id="researchQuery" class="text-input" type="text" maxlength="200" placeholder="e.g. best budget phones 2026" autocomplete="off" spellcheck="false">
+    </label>
+    <p id="researchErr" class="field-err" hidden></p>
+    <div class="modal-actions">
+      <button id="researchKeyChange" class="btn-ghost" type="button">Change key</button>
+      <button id="researchGo" class="btn-primary" type="button">Research</button>
     </div>
   </div>
 </div>

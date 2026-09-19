@@ -184,8 +184,8 @@ function renderToolRail() {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "rail-tool";
+    b.dataset.label = t.name + " — @" + toolCmdName(t);
     b.textContent = toolInitial(t);
-    b.title = "Command " + t.name + " (@" + toolCmdName(t) + ")";
     b.setAttribute("aria-label", "Command " + t.name);
     b.addEventListener("click", () => prefillTool(t));
     box.appendChild(b);
@@ -312,6 +312,164 @@ async function runToolCommand(tool, command) {
     /* user-pressed stop: stay silent */
   } finally {
     clearTimeout(toolTimer);
+    sendAbort = null; stopReason = null;
+    sending = false;
+    sendBtn.classList.remove("stop");
+    sendBtn.setAttribute("aria-label", "Send message");
+    if (!listening) setCoreState("idle");
+    renderSidebar($("#searchInput").value);
+  }
+}
+
+/* ================= Web Research: live web + Mojo's brief =================
+   Research is a special tool with its own icon in the rail and sidebar.
+   It searches the live web with the USER'S OWN Brave Search key (free
+   2,000 searches/month at brave.com/search/api), then Mojo's brain writes
+   a sourced brief. The key lives only in this browser — like other tools. */
+const LS_RESEARCH_KEY = "mojo.researchKey.v1";
+function getResearchKey() {
+  try { return localStorage.getItem(LS_RESEARCH_KEY) || ""; } catch (e) { return ""; }
+}
+function openResearch() {
+  if (!getResearchKey()) { openResearchKeyModal(); return; }
+  const err = $("#researchErr");
+  if (err) err.hidden = true;
+  $("#researchModal").hidden = false;
+  if (isMobileLayout()) closeSidebar();
+  setTimeout(() => { const q = $("#researchQuery"); if (q) { q.value = ""; q.focus(); } }, 60);
+}
+function closeResearch() { $("#researchModal").hidden = true; }
+function openResearchKeyModal() {
+  const err = $("#researchKeyErr");
+  if (err) err.hidden = true;
+  $("#researchKeyModal").hidden = false;
+  if (isMobileLayout()) closeSidebar();
+  setTimeout(() => { const k = $("#researchKeyInput"); if (k) { k.value = ""; k.focus(); } }, 60);
+}
+function closeResearchKeyModal() { $("#researchKeyModal").hidden = true; }
+function saveResearchKey() {
+  const err = $("#researchKeyErr");
+  const fail = m => { if (err) { err.textContent = m; err.hidden = false; } };
+  const key = (($("#researchKeyInput") || {}).value || "").trim();
+  if (key.length < 8) return fail("Paste your Brave Search API key.");
+  try { localStorage.setItem(LS_RESEARCH_KEY, key); }
+  catch (e) { return fail("Could not save in this browser's storage."); }
+  closeResearchKeyModal();
+  toast("Research key saved, sir.");
+  openResearch();
+}
+/* Reads an SSE chat stream into one string, without touching the screen. */
+async function collectStreamText(res) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "", acc = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (line.slice(0, 5) !== "data:") continue;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      try {
+        const j = JSON.parse(data);
+        if (j && !j.error && j.choices && j.choices[0] && j.choices[0].delta)
+          acc += j.choices[0].delta.content || "";
+      } catch (e) { /* keep going */ }
+    }
+  }
+  return acc;
+}
+async function runResearch(query) {
+  query = (query || "").trim();
+  if (!query || sending) return;
+  const key = getResearchKey();
+  if (!key) { openResearchKeyModal(); toast("Attach your free Brave Search key first, sir."); return; }
+  stopSpeak();
+  let c = getActive();
+  if (!c) c = createConversation();
+  const label = "@research " + query;
+  c.messages.push({ role: "user", text: label, ts: Date.now() });
+  if (c.messages.filter(m => m.role === "user").length === 1) c.title = makeTitle("Research: " + query);
+  c.updatedAt = Date.now(); saveConvs();
+  $("#input").value = ""; autoresize();
+  renderSidebar($("#searchInput").value);
+  renderMessages();
+  sending = true;
+  const sendBtn = $("#sendBtn");
+  sendBtn.classList.add("stop");
+  sendBtn.setAttribute("aria-label", "Stop generating");
+  setCoreState("thinking");
+  appendThinking();
+  sendAbort = new AbortController();
+  stopReason = null;
+  const rsTimer = setTimeout(() => {
+    stopReason = "timeout";
+    try { sendAbort.abort(); } catch (e) {}
+  }, 90000);
+  try {
+    /* 1 — live web search with the user's own key. */
+    const sRes = await fetch("/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: key, query }),
+      signal: sendAbort.signal,
+    });
+    const sData = await sRes.json().catch(() => ({}));
+    removeThinking();
+    if (!sRes.ok || sData.error || !sData.results || !sData.results.length) {
+      throw new Error((sData && sData.detail) || "No results came back from the web.");
+    }
+    const results = sData.results;
+    /* 2 — Mojo's brain writes the brief from the sources. */
+    const srcText = results.map((r, i) =>
+      "[" + (i + 1) + "] " + r.title + " — " + r.url + "\n" + r.snippet).join("\n\n");
+    const briefMsg =
+      "You are Mojo's research writer. Using ONLY the web sources below, answer the user's question " +
+      "with a short premium brief: a 2-3 line summary first, then the key points as bullets. " +
+      "Cite facts with the source number like [1]. If the sources don't cover it, say so honestly. " +
+      "Keep it tight, no filler.\n\nQuestion: " + query + "\n\nSources:\n" + srcText;
+    setCoreState("thinking");
+    appendThinking();
+    const cRes = await fetch("/api/chat", {
+      method: "POST",
+      headers: brainKeyHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ message: briefMsg, history: [], notes: "" }),
+      signal: sendAbort.signal,
+    });
+    const ct = cRes.headers.get("content-type") || "";
+    let reply = "";
+    if (cRes.ok && ct.includes("text/event-stream") && cRes.body) {
+      reply = await collectStreamText(cRes);
+    } else {
+      const cData = await cRes.json().catch(() => ({}));
+      if (!cRes.ok || cData.error) throw new Error(cData.detail || "The brain couldn't write the brief.");
+      reply = cData.reply || "";
+    }
+    removeThinking();
+    reply = String(reply || "").trim();
+    if (!reply) throw new Error("The brain couldn't write the brief.");
+    const srcLinks = results.map((r, i) =>
+      "[" + (i + 1) + ". " + r.title.replace(/[\[\]]/g, "") + "](" + r.url + ")").join(" · ");
+    const full = "🔍 Research\n" + reply + "\n\nSources: " + srcLinks;
+    c.messages.push({ role: "assistant", text: full, ts: Date.now() });
+    c.updatedAt = Date.now(); saveConvs();
+    appendMessageBubble("assistant", full, null, true, c.messages.length - 1);
+    speak(reply);
+  } catch (e) {
+    removeThinking();
+    if (!(e && e.name === "AbortError")) {
+      const msg = "Research couldn't run: " + (e && e.message ? e.message : "unknown error") + " Please try again.";
+      c.messages.push({ role: "error", text: msg, ts: Date.now() });
+      saveConvs();
+      appendErrorBubble(msg);
+    }
+    /* user-pressed stop: stay silent */
+  } finally {
+    clearTimeout(rsTimer);
     sendAbort = null; stopReason = null;
     sending = false;
     sendBtn.classList.remove("stop");
@@ -645,7 +803,7 @@ function renderStatus() {
   }
   $("#setServer").textContent = (!health || health.offline) ? "Unreachable" : "Online";
   $("#setServer").className = "set-val " + ((!health || health.offline) ? "bad" : "good");
-  $("#setModel").textContent = (health && health.model) || "—";
+  /* The exact model name stays hidden — the brain is simply "Mojo". */
   const brain = $("#setBrain");
   const personal = !!getBrainKey();
   if (!health || health.offline) { brain.textContent = "Unknown"; brain.className = "set-val"; }
@@ -654,25 +812,29 @@ function renderStatus() {
 }
 
 /* ================= Personal brain key ================= */
-function setBrainKeyNote(t) {
-  const n = $("#brainKeyNote");
+function setBrainKeyNote(t, noteSel) {
+  const n = $(noteSel || "#brainKeyNote");
   if (n) n.textContent = t;
 }
 function syncBrainKeyUI() {
-  const input = $("#brainKeyInput");
-  if (!input) return;
   const has = !!getBrainKey();
-  input.value = "";
-  input.placeholder = has ? "•••••••• — a key is saved on this device" : "sk-or-… (OpenRouter key)";
-  setBrainKeyNote(has
-    ? "A personal key is saved on this device — Mojo's brain uses it here."
-    : "Saved only in this phone or PC's browser. When set, your key is used for Mojo's brain on this device.");
+  for (const [inputSel, noteSel] of [["#brainKeyInput", "#brainKeyNote"], ["#sideBrainKeyInput", "#sideBrainNote"]]) {
+    const input = $(inputSel);
+    if (!input) continue;
+    input.value = "";
+    input.placeholder = has ? "•••••••• — a key is saved on this device" : "sk-or-… (OpenRouter key)";
+    setBrainKeyNote(has
+      ? "A personal key is saved on this device — Mojo's brain uses it here."
+      : "Saved only in this browser. When set, your key powers Mojo's brain on this device.", noteSel);
+  }
+  const dot = $("#sideBrainDot");
+  if (dot) dot.classList.toggle("on", has);
 }
-async function saveBrainKey() {
-  const input = $("#brainKeyInput");
+async function saveBrainKeyFrom(inputSel, noteSel) {
+  const input = $(inputSel);
   const key = ((input && input.value) || "").trim();
-  if (!key) { setBrainKeyNote("Paste your OpenRouter API key first."); return; }
-  setBrainKeyNote("Testing your key with the brain…");
+  if (!key) { setBrainKeyNote("Paste your OpenRouter API key first.", noteSel); return; }
+  setBrainKeyNote("Testing your key with the brain…", noteSel);
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
@@ -681,19 +843,20 @@ async function saveBrainKey() {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      setBrainKeyNote("Key test failed (" + (data.detail || data.error || ("HTTP " + res.status)) + ") — not saved. Check the key and try again.");
+      setBrainKeyNote("Key test failed (" + (data.detail || data.error || ("HTTP " + res.status)) + ") — not saved. Check the key and try again.", noteSel);
       return;
     }
     try { if (res.body && res.body.cancel) await res.body.cancel(); } catch (e) {}
     try { localStorage.setItem(LS_BRAIN_KEY, key); }
-    catch (e) { setBrainKeyNote("Could not save in this browser's storage."); return; }
+    catch (e) { setBrainKeyNote("Could not save in this browser's storage.", noteSel); return; }
     syncBrainKeyUI();
     toast("Personal brain key saved on this device.");
     refreshHealth();
   } catch (e) {
-    setBrainKeyNote("Could not reach the server. Key not saved.");
+    setBrainKeyNote("Could not reach the server. Key not saved.", noteSel);
   }
 }
+function saveBrainKey() { return saveBrainKeyFrom("#brainKeyInput", "#brainKeyNote"); }
 function removeBrainKey() {
   try { localStorage.removeItem(LS_BRAIN_KEY); } catch (e) {}
   syncBrainKeyUI();
@@ -1050,6 +1213,8 @@ async function sendMessage(text) {
   if (!attachedImage) {
     const tm = text.match(/^@([A-Za-z0-9_-]+)\s+([\s\S]+)$/);
     if (tm) {
+      /* @research is Mojo's special web-research tool (user's own Brave key). */
+      if (tm[1].toLowerCase() === "research") { runResearch(tm[2]); return; }
       const tool = tools.find(t => toolCmdName(t) === tm[1].toLowerCase());
       if (tool) { runToolCommand(tool, tm[2]); return; }
     }
@@ -1644,6 +1809,7 @@ function init() {
   applySettingsUI();
   renderSidebar("");
   renderTools();
+  syncBrainKeyUI(); /* sidebar brain-key card + status dot */
   renderMessages();
   refreshHealth();
 
@@ -1694,6 +1860,25 @@ function init() {
   $("#attachToolBtn").addEventListener("click", openToolModal);
   const railNew = $("#railNewChat"); if (railNew) railNew.addEventListener("click", startNewChat);
   const railAdd = $("#railAdd"); if (railAdd) railAdd.addEventListener("click", openToolModal);
+  const railResearch = $("#railResearch"); if (railResearch) railResearch.addEventListener("click", openResearch);
+  const sideResearch = $("#researchSideBtn"); if (sideResearch) sideResearch.addEventListener("click", openResearch);
+
+  // Research modals
+  $("#researchClose").addEventListener("click", closeResearch);
+  $("#researchModal").addEventListener("click", e => { if (e.target.id === "researchModal") closeResearch(); });
+  $("#researchGo").addEventListener("click", () => { const q = $("#researchQuery").value; closeResearch(); runResearch(q); });
+  $("#researchQuery").addEventListener("keydown", e => { if (e.key === "Enter") { const q = $("#researchQuery").value; closeResearch(); runResearch(q); } });
+  $("#researchKeyChange").addEventListener("click", () => { closeResearch(); openResearchKeyModal(); });
+  $("#researchKeyClose").addEventListener("click", closeResearchKeyModal);
+  $("#researchKeyCancel").addEventListener("click", closeResearchKeyModal);
+  $("#researchKeyModal").addEventListener("click", e => { if (e.target.id === "researchKeyModal") closeResearchKeyModal(); });
+  $("#researchKeySave").addEventListener("click", saveResearchKey);
+  $("#researchKeyInput").addEventListener("keydown", e => { if (e.key === "Enter") saveResearchKey(); });
+
+  // Personal brain key — also lives in the sidebar now
+  const sideSave = $("#sideSaveBrainKey"); if (sideSave) sideSave.addEventListener("click", () => saveBrainKeyFrom("#sideBrainKeyInput", "#sideBrainNote"));
+  const sideRemove = $("#sideRemoveBrainKey"); if (sideRemove) sideRemove.addEventListener("click", removeBrainKey);
+  const sideBrainInput = $("#sideBrainKeyInput"); if (sideBrainInput) sideBrainInput.addEventListener("keydown", e => { if (e.key === "Enter") saveBrainKeyFrom("#sideBrainKeyInput", "#sideBrainNote"); });
   $("#toolModalClose").addEventListener("click", closeToolModal);
   $("#toolModalCancel").addEventListener("click", closeToolModal);
   $("#toolModal").addEventListener("click", e => { if (e.target.id === "toolModal") closeToolModal(); });
@@ -1733,7 +1918,7 @@ function init() {
 
   // Escape closes drawer / sidebar / tool modal
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { closeToolModal(); closeDrawer(); closeSidebar(); }
+    if (e.key === "Escape") { closeToolModal(); closeResearch(); closeResearchKeyModal(); closeDrawer(); closeSidebar(); }
   });
 }
 

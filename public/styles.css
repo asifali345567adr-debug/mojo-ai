@@ -584,12 +584,61 @@ textarea.text-input { resize: vertical; min-height: 66px; line-height: 1.5; font
   border: 1px dashed rgba(255,255,255,0.25);
 }
 .rail-add:hover { color: #fff; border-color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.06); }
+/* Research: a special tool — deep indigo tile so it stands apart, premium. */
+.rail-research { background: linear-gradient(135deg, #2e3a63 0%, #1d2545 100%); color: #dfe6ff; }
+.rail-research:hover { border-color: rgba(160,175,255,0.45); }
+/* Premium hover labels on rail icons: the name glides out to the right. */
+.rail-tool { position: relative; }
+.rail-tool::after {
+  content: attr(data-label);
+  position: absolute; left: calc(100% + 10px); top: 50%;
+  transform: translateY(-50%) translateX(-6px);
+  background: #1b1b1e; color: #f2f2f4;
+  font-size: 12.5px; font-weight: 600; font-family: var(--font);
+  padding: 7px 12px; border-radius: 9px; white-space: nowrap;
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.4);
+  opacity: 0; pointer-events: none; z-index: 60;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.rail-tool:hover::after, .rail-tool:focus-visible::after {
+  opacity: 1; transform: translateY(-50%) translateX(0);
+}
 @media (max-width: 900px) {
   /* Mobile: the rail stays at the left edge at all times; the open drawer slides over it. */
   #toolRail { width: 56px; flex-basis: 56px; padding: 10px 6px; }
   .rail-logo { width: 32px; height: 32px; flex-basis: 32px; }
   .rail-tool { width: 38px; height: 38px; font-size: 17px; border-radius: 12px; }
+  .rail-tool::after { display: none; } /* no hover on touch; names live in the sidebar */
 }
+
+/* ---------- Research row in the sidebar tools section ---------- */
+.tool-item.tool-research {
+  background: linear-gradient(135deg, rgba(46,58,99,0.28), rgba(29,37,69,0.16));
+  border: 1px solid rgba(120,140,220,0.22);
+}
+.tool-item.tool-research:hover { border-color: rgba(120,140,220,0.45); }
+.research-icon {
+  background: linear-gradient(135deg, #2e3a63 0%, #1d2545 100%) !important;
+  color: #dfe6ff !important;
+}
+.tool-badge {
+  margin-left: auto; font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: #a9b6e8;
+  background: rgba(46,58,99,0.25); border: 1px solid rgba(120,140,220,0.25);
+  padding: 2px 7px; border-radius: 20px;
+}
+
+/* ---------- Personal brain card in the sidebar ---------- */
+#brainSection { margin-top: 14px; }
+.brain-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #b9b9be; display: inline-block; flex: 0 0 9px;
+}
+.brain-dot.on { background: #34c77b; box-shadow: 0 0 8px rgba(52,199,123,0.7); }
+.brain-input { width: 100%; margin-bottom: 8px; }
+.brain-btns { display: flex; gap: 8px; }
+.brain-btns .btn-ghost { flex: 1; padding: 8px 10px; font-size: 13px; }
 @media (min-width: 901px) {
   /* Desktop: the collapsed sidebar hides behind the always-visible rail. */
   #app.side-collapsed #sidebar { margin-left: -300px; }
