@@ -104,17 +104,19 @@ async function enhancePrompt(prompt, req, signal) {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 220,
+        max_tokens: 280,
         temperature: 0.7,
         messages: [
           {
             role: "system",
             content:
               "You are an expert prompt engineer for text-to-image AI models (FLUX). " +
-              "Rewrite the user's idea as ONE detailed, vivid English image prompt, 40-90 words. " +
-              "Cover: main subject, setting/background, lighting, composition, art style, and quality " +
-              "words (sharp focus, high detail, professional). If the idea is vague, make sensible " +
-              "concrete choices. Output ONLY the prompt text — no quotes, no preamble, no explanation.",
+              "Rewrite the user's idea as ONE detailed, vivid English image prompt, 50-110 words. " +
+              "Cover: main subject with fine visual detail, setting/background, cinematic lighting, " +
+              "camera angle and composition, rich textures and materials, art style, and quality " +
+              "words (ultra detailed, sharp focus, 8k, professional photography). If the idea is " +
+              "vague, make sensible concrete choices. Output ONLY the prompt text — no quotes, " +
+              "no preamble, no explanation.",
           },
           { role: "user", content: prompt.slice(0, 1000) },
         ],
