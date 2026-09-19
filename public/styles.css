@@ -46,7 +46,7 @@ body {
 }
 /* Desktop: click the menu button to collapse / open the side chat. */
 @media (min-width: 901px) {
-  #app.side-collapsed #sidebar { margin-left: -300px; }
+  #app.side-collapsed #sidebar { margin-left: calc(-300px - 52px); } /* -sidebar width - rail width: no sliver peeks out */
 }
 #sidebar.dragging { transition: none; }
 .side-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 10px; }
