@@ -121,6 +121,7 @@ function toolCmdName(t) {
 function renderTools() {
   const list = $("#toolList");
   const count = $("#toolsCount");
+  renderToolRail();
   if (!list) return;
   list.innerHTML = "";
   if (count) count.textContent = tools.length ? String(tools.length) : "";
@@ -151,14 +152,43 @@ function renderTools() {
     x.addEventListener("click", e => { e.stopPropagation(); detachTool(t.id); });
     b.appendChild(ic); b.appendChild(nm); b.appendChild(x);
     b.addEventListener("click", () => {
-      const ta = $("#input");
-      const prefix = "@" + toolCmdName(t) + " ";
-      if (ta && !ta.value.startsWith(prefix)) ta.value = prefix + ta.value;
+      prefillTool(t);
       if (isMobileLayout()) closeSidebar();
-      if (ta) { ta.focus(); autoresize(); }
     });
     list.appendChild(b);
   }
+}
+/* Slim icon rail at the left edge, shown when the sidebar is closed on
+   desktop: the attached tool icons stay one tap away, like the library. */
+function renderToolRail() {
+  const rail = $("#toolRail");
+  if (!rail) return;
+  rail.innerHTML = "";
+  for (const t of tools) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rail-tool";
+    b.textContent = t.icon || "🔌";
+    b.title = "Command " + t.name + " (@" + toolCmdName(t) + ")";
+    b.setAttribute("aria-label", "Command " + t.name);
+    b.addEventListener("click", () => prefillTool(t));
+    rail.appendChild(b);
+  }
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "rail-tool rail-add";
+  add.textContent = "+";
+  add.title = "Attach a tool";
+  add.setAttribute("aria-label", "Attach a tool");
+  add.addEventListener("click", openToolModal);
+  rail.appendChild(add);
+}
+/* Puts "@tool " into the composer so the next message commands that tool. */
+function prefillTool(t) {
+  const ta = $("#input");
+  const prefix = "@" + toolCmdName(t) + " ";
+  if (ta && !ta.value.startsWith(prefix)) ta.value = prefix + ta.value;
+  if (ta) { ta.focus(); autoresize(); }
 }
 function openToolModal() {
   const err = $("#toolModalErr");
