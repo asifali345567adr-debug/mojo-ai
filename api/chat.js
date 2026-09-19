@@ -2,6 +2,8 @@ import {
   API_KEY,
   API_URL,
   MODEL,
+  CHAT_MODEL,
+  chatBrainPost,
   VISION_MODEL,
   VISION_FALLBACK_MODEL,
   VISION_FALLBACK2_MODEL,
@@ -42,17 +44,23 @@ export default async function handler(req, res) {
       .status(429)
       .json({ error: "RATE_LIMITED", detail: "Too many requests. Please wait a moment and try again." });
   }
-  // A personal key from the user's own device (X-Brain-Key header) takes
-  // precedence over the server key for this request only.
-  const activeKey = userKeyFromReq(req) || API_KEY;
-  if (!activeKey) {
-    noStore(res);
-    return res.status(500).json({ error: "AI_CONNECTION_NOT_CONFIGURED" });
-  }
-
   const userText = String(body.message || "").slice(0, MAX_MESSAGE_CHARS);
   const hasImage =
     typeof body.image === "string" && body.image.startsWith("data:image");
+
+  // Brain routing: vision always rides OpenRouter (its free vision models read
+  // photos best), so the 50/day free quota is spent only on photo analysis.
+  // Plain text chat uses the user's personal OpenRouter key when attached,
+  // otherwise the free Pollinations chat brain (OpenAI-compatible, no daily
+  // request cap). A personal key from the user's own device (X-Brain-Key
+  // header) takes precedence over the server key for that request only.
+  const personalKey = userKeyFromReq(req);
+  const usePollinations = !hasImage && !personalKey;
+  const activeKey = personalKey || API_KEY;
+  if (!usePollinations && !activeKey) {
+    noStore(res);
+    return res.status(500).json({ error: "AI_CONNECTION_NOT_CONFIGURED" });
+  }
   if (!userText && !hasImage) {
     noStore(res);
     return res.status(400).json({ error: "empty_message" });
@@ -71,7 +79,7 @@ export default async function handler(req, res) {
   // different providers before the user ever sees an error.
   const models = hasImage
     ? [VISION_MODEL, VISION_FALLBACK_MODEL, VISION_FALLBACK2_MODEL, VISION_FALLBACK3_MODEL]
-    : [MODEL];
+    : [usePollinations ? CHAT_MODEL : MODEL];
 
   // Each model in the chain gets its own deadline (PER_MODEL_TIMEOUT_MS), so a
   // hung primary can never starve the fallbacks of their chance — previously a
@@ -100,18 +108,20 @@ export default async function handler(req, res) {
             messages: buildMessages(body),
             stream: true,
           });
-          const skipThinking = !hasImage;
+          const skipThinking = !hasImage && !usePollinations;
           const reqBody = plainBody();
           if (skipThinking) reqBody.reasoning = { effort: "none" };
-          out = await providerPost(
-            `${API_URL}/chat/completions`,
-            reqBody,
-            mc.signal,
-            models.length === 1 ? 3 : 2,
-            activeKey
-          );
+          out = usePollinations
+            ? await chatBrainPost(reqBody, mc.signal, 3)
+            : await providerPost(
+                `${API_URL}/chat/completions`,
+                reqBody,
+                mc.signal,
+                models.length === 1 ? 3 : 2,
+                activeKey
+              );
           const rs = out.status || 0;
-          if (!out.ok && skipThinking && rs >= 400 && rs < 500 && rs !== 429) {
+          if (!out.ok && !usePollinations && skipThinking && rs >= 400 && rs < 500 && rs !== 429) {
             // This provider rejected the reasoning toggle: retry once with a
             // plain request instead of failing the chat.
             out = await providerPost(
@@ -157,7 +167,7 @@ export default async function handler(req, res) {
           ),
         });
       }
-      const detail = friendlyDetail(out.detail, "The AI provider returned an error.");
+      const detail = friendlyDetail(out.detail, "Mojo's chat brain is busy right now. Please try again in a moment.");
       return res
         .status(502)
         .json({ error: "AI_CONNECTION_ERROR", detail });

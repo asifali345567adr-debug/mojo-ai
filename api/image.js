@@ -13,7 +13,7 @@
 //
 // Images stream back through this function and are never stored on the server.
 
-import { clientIp, rateLimited, noStore, API_URL, API_KEY, MODEL, userKeyFromReq } from "./_lib.js";
+import { clientIp, rateLimited, noStore, API_URL, API_KEY, MODEL, CHAT_API_URL, CHAT_MODEL, userKeyFromReq } from "./_lib.js";
 
 const MAX_PROMPT_CHARS = 2000;
 const IMAGE_TIMEOUT_MS = 55_000;
@@ -86,8 +86,11 @@ function sniffMime(buf) {
 // brain key when present, else the server key. Never throws: on any failure
 // the caller falls back to the raw prompt.
 async function enhancePrompt(prompt, req, signal) {
-  const key = userKeyFromReq(req) || API_KEY;
-  if (!key) return null;
+  // Enhancement rides the user's personal OpenRouter key when attached,
+  // otherwise the free Pollinations chat brain — never the server's
+  // OpenRouter quota, which stays reserved for photo analysis.
+  const personalKey = userKeyFromReq(req);
+  const usePollinations = !personalKey;
   const ctrl = new AbortController();
   const timer = setTimeout(() => {
     try { ctrl.abort(); } catch (e) {}
@@ -95,15 +98,17 @@ async function enhancePrompt(prompt, req, signal) {
   const onAbort = () => { try { ctrl.abort(); } catch (e) {} };
   if (signal) signal.addEventListener("abort", onAbort, { once: true });
   try {
-    const resp = await fetch(`${API_URL}/chat/completions`, {
+    const resp = await fetch(usePollinations ? CHAT_API_URL : `${API_URL}/chat/completions`, {
       method: "POST",
       signal: ctrl.signal,
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
+      headers: usePollinations
+        ? { "Content-Type": "application/json" }
+        : {
+            Authorization: `Bearer ${personalKey}`,
+            "Content-Type": "application/json",
+          },
       body: JSON.stringify({
-        model: MODEL,
+        model: usePollinations ? CHAT_MODEL : MODEL,
         max_tokens: 280,
         temperature: 0.7,
         messages: [

@@ -23,6 +23,15 @@ export const VISION_FALLBACK2_MODEL =
 export const VISION_FALLBACK3_MODEL =
   process.env.AI_VISION_FALLBACK3_MODEL || "qwen/qwen3.8-27b:free";
 
+// Chat brain: Pollinations text API — free, no key required, OpenAI-compatible.
+// Plain text chat and image-prompt enhancement run here, so the 50/day
+// OpenRouter free quota is reserved purely for photo analysis (vision), which
+// Pollinations reads less reliably. Text goes through anonymously on purpose:
+// a server POLLINATIONS_KEY (used for image generation) is never touched, so
+// chat can never drain it.
+export const CHAT_API_URL = (process.env.CHAT_API_URL || "https://text.pollinations.ai/openai").replace(/\/$/, "");
+export const CHAT_MODEL = process.env.CHAT_MODEL || "openai";
+
 // Image-analysis mastery: appended to the system prompt on vision requests, so
 // Mojo reads any photo like the best visual analyst in the room.
 export const VISION_ANALYSIS_PROMPT =
@@ -217,6 +226,53 @@ export async function providerPost(url, bodyObj, signal, attempts = 3, apiKey = 
   } catch (e) {}
   detail = String(detail || "").slice(0, 200);
   return { ok: false, status: lastStatus, detail: detail || `provider HTTP ${lastStatus}` };
+}
+
+// POST to the free Pollinations chat brain (OpenAI-compatible). Same retry
+// shape as providerPost: transient 5xx/429s are retried with backoff, other
+// 4xx are final. No daily quota concept here — 429 just means "slow down".
+export async function chatBrainPost(bodyObj, signal, attempts = 3) {
+  const payload = JSON.stringify(bodyObj);
+  let lastStatus = 0;
+  let lastErrText = "";
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (signal && signal.aborted) {
+      const e = new Error("aborted");
+      e.name = "AbortError";
+      throw e;
+    }
+    try {
+      const resp = await fetch(CHAT_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://mojo-ai.vercel.app",
+        },
+        body: payload,
+        signal: signal || undefined,
+      });
+      if (resp.ok) return { ok: true, resp };
+      lastStatus = resp.status;
+      lastErrText = await resp.text().catch(() => "");
+      try {
+        if (resp.body && resp.body.cancel) await resp.body.cancel();
+      } catch (e) {}
+      const retryable = resp.status >= 500 || resp.status === 429;
+      if (!retryable || attempt === attempts) break;
+    } catch (e) {
+      if (e && e.name === "AbortError") throw e;
+      lastStatus = 0;
+      if (attempt === attempts) break;
+    }
+    await new Promise((r) => setTimeout(r, attempt * 1500));
+  }
+  let detail = lastErrText;
+  try {
+    const data = JSON.parse(lastErrText);
+    if (data && data.error && data.error.message) detail = String(data.error.message);
+  } catch (e) {}
+  detail = String(detail || "").slice(0, 200);
+  return { ok: false, status: lastStatus, detail: detail || `chat brain HTTP ${lastStatus}` };
 }
 
 // Public quota message: never leak provider internals (provider names, credit
