@@ -60,7 +60,7 @@
       <p class="tools-note">Attach your own AI tools — Grok, ChatGPT, Gemini, DeepSeek, Mistral, Perplexity and more — with your own key. Type <code>@tool</code> in chat to command it.</p>
     </section>
     <section id="brainSection" aria-label="Personal brain">
-      <div class="tools-head"><span>Personal brain</span><span id="sideBrainDot" class="brain-dot" title="Key status"></span></div>
+      <div class="tools-head brain-head"><span class="tools-head-label"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="2.6"/><circle cx="5" cy="19" r="2.6"/><circle cx="19" cy="19" r="2.6"/><path d="M12 7.6v3.9M12 11.5l-5.4 5.2M12 11.5l5.4 5.2"/></svg>Personal brain</span><span id="sideBrainDot" class="brain-dot" title="Key status"></span></div>
       <input id="sideBrainKeyInput" type="password" class="text-input brain-input" placeholder="sk-or-… (OpenRouter key)" autocomplete="off" spellcheck="false" aria-label="Personal brain API key">
       <div class="brain-btns">
         <button id="sideSaveBrainKey" class="btn-ghost" type="button">Save key</button>
@@ -154,7 +154,7 @@
         </button>
         <textarea id="input" rows="1" placeholder="Ask Mojo anything…" aria-label="Message Mojo"></textarea>
         <button id="micBtn" class="icon-btn" type="button" aria-label="Voice input">
-          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></svg>
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></svg>
         </button>
         <button id="sendBtn" class="send-btn" type="button" aria-label="Send message">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
@@ -179,15 +179,6 @@
       <h3>Connection</h3>
       <div class="set-row"><span>Server</span><span id="setServer" class="set-val">Checking…</span></div>
       <div class="set-row"><span>Brain</span><span id="setBrain" class="set-val">—</span></div>
-      <div class="set-key-block">
-        <label for="brainKeyInput" class="set-key-label">Personal brain key</label>
-        <input id="brainKeyInput" type="password" class="text-input" placeholder="sk-or-… (OpenRouter key)" autocomplete="off" spellcheck="false" aria-label="Personal brain API key">
-        <div class="set-key-btns">
-          <button id="saveBrainKey" class="btn-ghost" type="button">Save key</button>
-          <button id="removeBrainKey" class="btn-ghost" type="button">Remove</button>
-        </div>
-        <p id="brainKeyNote" class="set-note">Saved only in this phone's browser. When set, your key is used for Mojo's brain on this device.</p>
-      </div>
       <button id="refreshHealth" class="btn-ghost" type="button">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         Refresh status
@@ -285,7 +276,7 @@
   </div>
 </div>
 
-<!-- Research: connect your own free Brave Search key -->
+<!-- Research: connect your own free Tavily key -->
 <div id="researchKeyModal" class="modal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="researchKeyTitle">
     <div class="modal-head">
@@ -294,10 +285,10 @@
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
-    <p class="modal-sub">Research uses <strong>your own free Brave Search key</strong> (2,000 searches/month free). Get one at <a href="https://brave.com/search/api/" target="_blank" rel="noopener">brave.com/search/api</a> — it takes a minute. The key is stored <strong>only in this browser</strong>; Mojo never keeps it.</p>
+    <p class="modal-sub">Research uses <strong>your own free Tavily key</strong> (1,000 searches/month free, no card needed). Get one at <a href="https://tavily.com" target="_blank" rel="noopener">tavily.com</a> — it takes a minute. The key is stored <strong>only in this browser</strong>; Mojo never keeps it.</p>
     <label class="field">
-      <span>Brave Search API key</span>
-      <input id="researchKeyInput" class="text-input mono" type="password" placeholder="BSA…" autocomplete="off" spellcheck="false">
+      <span>Tavily API key</span>
+      <input id="researchKeyInput" class="text-input mono" type="password" placeholder="tvly-…" autocomplete="off" spellcheck="false">
     </label>
     <p id="researchKeyErr" class="field-err" hidden></p>
     <div class="modal-actions">
