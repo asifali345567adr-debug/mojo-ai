@@ -127,6 +127,13 @@ function toolCmdName(t) {
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return s || "tool";
 }
+/* Premium monogram for the tool tile: first character of the name, e.g. "Grok" -> "G". */
+function toolInitial(t) {
+  const s = String((t && t.name) || "").trim();
+  if (!s) return "•";
+  const ch = Array.from(s)[0];
+  return /[a-z]/.test(ch) ? ch.toUpperCase() : ch;
+}
 function renderTools() {
   const list = $("#toolList");
   const count = $("#toolsCount");
@@ -148,7 +155,7 @@ function renderTools() {
     b.title = "Command " + t.name + " — or type @" + toolCmdName(t) + " in chat";
     const ic = document.createElement("span");
     ic.className = "tool-icon";
-    ic.textContent = t.icon || "🔌";
+    ic.textContent = toolInitial(t);
     const nm = document.createElement("span");
     nm.className = "tool-name";
     nm.textContent = t.name;
@@ -177,7 +184,7 @@ function renderToolRail() {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "rail-tool";
-    b.textContent = t.icon || "🔌";
+    b.textContent = toolInitial(t);
     b.title = "Command " + t.name + " (@" + toolCmdName(t) + ")";
     b.setAttribute("aria-label", "Command " + t.name);
     b.addEventListener("click", () => prefillTool(t));

@@ -512,7 +512,8 @@ textarea.text-input { resize: vertical; min-height: 66px; line-height: 1.5; font
 .tool-icon {
   flex: 0 0 30px; width: 30px; height: 30px; border-radius: 9px;
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--ink); color: #f2f2f4; font-size: 15px;
+  background: var(--ink); color: #f2f2f4; font-size: 14px; font-weight: 650;
+  font-family: var(--font);
 }
 .tool-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-detach {
@@ -577,8 +578,8 @@ textarea.text-input { resize: vertical; min-height: 66px; line-height: 1.5; font
 .rail-tool {
   width: 38px; height: 38px; border-radius: 11px; cursor: pointer; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--ink); color: #f2f2f4; font-size: 18px;
-  border: 1px solid transparent;
+  background: var(--ink); color: #f2f2f4; font-size: 17px; font-weight: 650;
+  border: 1px solid transparent; font-family: var(--font);
 }
 .rail-tool:hover { border-color: var(--border-strong); }
 .rail-add {
