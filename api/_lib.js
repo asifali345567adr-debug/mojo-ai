@@ -302,7 +302,23 @@ export function friendlyDetail(detail, fallback) {
       quotaResetIn() +
       ". Please try again then."
     );
-  return d || fallback;
+  // Never leak upstream internals to app users: raw JSON error blobs, URLs,
+  // provider/model names, IP addresses, or rate-limit queue jargon all become
+  // plain, honest messages instead.
+  const looksRaw =
+    /^\s*\{/.test(d) || // raw JSON blob
+    /https?:\/\//i.test(d) || // URLs
+    /\b\d{1,3}(\.\d{1,3}){3}\b/.test(d) || // IP addresses
+    /queue full/i.test(d) || // per-IP queue jargon
+    /enter\./i.test(d) ||
+    /pollinations/i.test(d);
+  if (!d || looksRaw) return fallback;
+  if (/timed? ?out/i.test(d))
+    return "That took too long to answer. Please try again.";
+  if (/429|rate.?limit|too many requests/i.test(d))
+    return "Things are busy right now. Please wait a moment and try again.";
+  // Strip anything in quotes/backticks that smells like an identifier.
+  return d;
 }
 
 // API responses are never cacheable.

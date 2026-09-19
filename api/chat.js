@@ -139,7 +139,7 @@ export default async function handler(req, res) {
           out = {
             ok: false,
             status: 0,
-            detail: e && e.name === "AbortError" ? "model timed out" : String((e && e.message) || e),
+            detail: e && e.name === "AbortError" ? "request timed out" : String((e && e.message) || e),
           };
         } finally {
           clearTimeout(mt);
@@ -180,8 +180,8 @@ export default async function handler(req, res) {
     return res.status(timedOut ? 504 : 502).json({
             error: timedOut ? "AI_TIMEOUT" : "AI_CONNECTION_ERROR",
       detail: timedOut
-        ? "The AI provider took too long to respond. Please try again."
-        : "Couldn't reach the AI provider. Please try again.",
+        ? "Mojo took too long to respond. Please try again."
+        : "Couldn't reach Mojo's brain. Please check your connection and try again.",
     });
   }
 
