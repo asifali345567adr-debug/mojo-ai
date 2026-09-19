@@ -103,6 +103,9 @@ function renderMarkdown(src) {
   t = t.replace(/`([^`\n]+)`/g, "<code class=\"inline\">$1</code>");
   t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   t = t.replace(/(^|[\s(>])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  // Markdown images ![alt](url) render inline (before the link rule below,
+  // so the leading "!" isn't left dangling as link text).
+  t = t.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '<img src="$2" alt="$1" class="msg-md-img" loading="lazy">');
   t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   t = t.replace(/^### (.*)$/gm, "<h4>$1</h4>")
        .replace(/^## (.*)$/gm, "<h3>$1</h3>")
