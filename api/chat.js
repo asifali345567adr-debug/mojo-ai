@@ -3,6 +3,8 @@ import {
   API_URL,
   MODEL,
   CHAT_MODEL,
+  CHAT_FALLBACK_API_URL,
+  CHAT_FALLBACK_MODEL,
   chatBrainPost,
   VISION_MODEL,
   VISION_FALLBACK_MODEL,
@@ -51,13 +53,14 @@ export default async function handler(req, res) {
   // Brain routing: vision always rides OpenRouter (its free vision models read
   // photos best), so the 50/day free quota is spent only on photo analysis.
   // Plain text chat uses the user's personal OpenRouter key when attached,
-  // otherwise the free Pollinations chat brain (OpenAI-compatible, no daily
-  // request cap). A personal key from the user's own device (X-Brain-Key
-  // header) takes precedence over the server key for that request only.
+  // otherwise the shared chat brain on the owner's OpenRouter credit (same
+  // model family as before, so answers feel identical). A personal key from
+  // the user's own device (X-Brain-Key header) takes precedence over the
+  // server key for that request only.
   const personalKey = userKeyFromReq(req);
-  const usePollinations = !hasImage && !personalKey;
+  const useFreeBrain = !hasImage && !personalKey;
   const activeKey = personalKey || API_KEY;
-  if (!usePollinations && !activeKey) {
+  if (!useFreeBrain && !activeKey) {
     noStore(res);
     return res.status(500).json({ error: "AI_CONNECTION_NOT_CONFIGURED" });
   }
@@ -79,7 +82,7 @@ export default async function handler(req, res) {
   // different providers before the user ever sees an error.
   const models = hasImage
     ? [VISION_MODEL, VISION_FALLBACK_MODEL, VISION_FALLBACK2_MODEL, VISION_FALLBACK3_MODEL]
-    : [usePollinations ? CHAT_MODEL : MODEL];
+    : [useFreeBrain ? CHAT_MODEL : MODEL];
 
   // Each model in the chain gets its own deadline (PER_MODEL_TIMEOUT_MS), so a
   // hung primary can never starve the fallbacks of their chance — previously a
@@ -110,10 +113,10 @@ export default async function handler(req, res) {
             stream: true,
             temperature: 0.7,
           });
-          const skipThinking = !hasImage && !usePollinations;
+          const skipThinking = !hasImage && !useFreeBrain;
           const reqBody = plainBody();
           if (skipThinking) reqBody.reasoning = { effort: "none" };
-          out = usePollinations
+          out = useFreeBrain
             ? await chatBrainPost(reqBody, mc.signal, 3)
             : await providerPost(
                 `${API_URL}/chat/completions`,
@@ -123,7 +126,7 @@ export default async function handler(req, res) {
                 activeKey
               );
           const rs = out.status || 0;
-          if (!out.ok && !usePollinations && skipThinking && rs >= 400 && rs < 500 && rs !== 429) {
+          if (!out.ok && !useFreeBrain && skipThinking && rs >= 400 && rs < 500 && rs !== 429) {
             // This provider rejected the reasoning toggle: retry once with a
             // plain request instead of failing the chat.
             out = await providerPost(
@@ -158,23 +161,23 @@ export default async function handler(req, res) {
     } finally {
       clearTimeout(overallTimer);
     }
-    // Free-brain streaming fallback: the free streaming endpoint hangs or
-    // errors far more often than its non-stream twin. When streaming fails,
-    // retry once in non-stream mode and synthesize the sanitized SSE from the
-    // full reply — the user still gets their answer instead of an error.
-    // Still 100% free; no key credit is ever touched by this path.
-    if (!out.ok && usePollinations && userText) {
+    // Emergency fallback for the shared brain: if the credit-backed OpenRouter
+    // brain fails or hangs, answer once from the free keyless Pollinations
+    // endpoint and synthesize the sanitized SSE from the full reply — the
+    // user still gets their answer instead of an error, and no credit is
+    // spent on this path.
+    if (!out.ok && useFreeBrain && userText) {
       const fbCtrl = new AbortController();
       const fbTimer = setTimeout(() => fbCtrl.abort(), 20000);
       try {
-        const fbResp = await fetch(CHAT_API_URL, {
+        const fbResp = await fetch(CHAT_FALLBACK_API_URL, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "HTTP-Referer": "https://mojo-ai.vercel.app",
           },
           body: JSON.stringify({
-            model: CHAT_MODEL,
+            model: CHAT_FALLBACK_MODEL,
             messages: buildMessages(body),
             stream: false,
             temperature: 0.7,

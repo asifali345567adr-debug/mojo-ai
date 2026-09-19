@@ -29,8 +29,16 @@ export const VISION_FALLBACK3_MODEL =
 // Pollinations reads less reliably. Text goes through anonymously on purpose:
 // a server POLLINATIONS_KEY (used for image generation) is never touched, so
 // chat can never drain it.
-export const CHAT_API_URL = (process.env.CHAT_API_URL || "https://text.pollinations.ai/openai").replace(/\/$/, "");
-export const CHAT_MODEL = process.env.CHAT_MODEL || "openai";
+// Shared public chat brain: runs on the owner's OpenRouter credit (same model
+// family as the old free brain, so answers feel identical), with the free
+// Pollinations endpoint kept only as an emergency fallback below.
+export const CHAT_API_URL = (process.env.CHAT_API_URL || "https://openrouter.ai/api/v1/chat/completions").replace(/\/$/, "");
+export const CHAT_MODEL = process.env.CHAT_MODEL || "openai/gpt-oss-20b";
+// Emergency fallback for the shared brain: free and keyless. Used only when
+// the credit-backed brain fails, so chat never hard-dies — and if the credit
+// ever runs out, the free route keeps answering instead of erroring.
+export const CHAT_FALLBACK_API_URL = "https://text.pollinations.ai/openai";
+export const CHAT_FALLBACK_MODEL = "openai";
 
 // Image-analysis mastery: appended to the system prompt on vision requests, so
 // Mojo reads any photo like the best visual analyst in the room.
@@ -229,13 +237,22 @@ export async function providerPost(url, bodyObj, signal, attempts = 3, apiKey = 
   return { ok: false, status: lastStatus, detail: detail || `provider HTTP ${lastStatus}` };
 }
 
-// POST to the free Pollinations chat brain (OpenAI-compatible). Same retry
-// shape as providerPost: transient 5xx/429s are retried with backoff, other
-// 4xx are final. No daily quota concept here — 429 just means "slow down".
+// POST to the shared chat brain (OpenRouter, OpenAI-compatible, keyed by the
+// owner's server key). Same retry shape as providerPost: transient 5xx/429s
+// are retried with backoff, other 4xx are final. The Authorization header is
+// attached only for OpenRouter so the key is never sent to another host.
 export async function chatBrainPost(bodyObj, signal, attempts = 3) {
   const payload = JSON.stringify(bodyObj);
   let lastStatus = 0;
   let lastErrText = "";
+  const headers = {
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://mojo-ai.vercel.app",
+    "X-Title": "Mojo AI",
+  };
+  if (/openrouter\.ai/i.test(CHAT_API_URL) && API_KEY) {
+    headers["Authorization"] = "Bearer " + API_KEY;
+  }
   for (let attempt = 1; attempt <= attempts; attempt++) {
     if (signal && signal.aborted) {
       const e = new Error("aborted");
@@ -245,10 +262,7 @@ export async function chatBrainPost(bodyObj, signal, attempts = 3) {
     try {
       const resp = await fetch(CHAT_API_URL, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://mojo-ai.vercel.app",
-        },
+        headers,
         body: payload,
         signal: signal || undefined,
       });
