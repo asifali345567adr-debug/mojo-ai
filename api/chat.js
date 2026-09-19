@@ -157,7 +157,43 @@ export default async function handler(req, res) {
     } finally {
       clearTimeout(overallTimer);
     }
-    if (!out.ok) {
+    // Free-brain streaming fallback: the free streaming endpoint hangs or
+    // errors far more often than its non-stream twin. When streaming fails,
+    // retry once in non-stream mode and synthesize the sanitized SSE from the
+    // full reply — the user still gets their answer instead of an error.
+    // Still 100% free; no key credit is ever touched by this path.
+    let syntheticContent = "";
+    if (!out.ok && usePollinations && userText) {
+      const fbCtrl = new AbortController();
+      const fbTimer = setTimeout(() => fbCtrl.abort(), 20000);
+      try {
+        const fbResp = await fetch(CHAT_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://mojo-ai.vercel.app",
+          },
+          body: JSON.stringify({
+            model: CHAT_MODEL,
+            messages: buildMessages(body),
+            stream: false,
+            temperature: 0.7,
+          }),
+          signal: fbCtrl.signal,
+        });
+        if (fbResp.ok) {
+          const fbJson = await fbResp.json().catch(() => null);
+          const fbChoice = fbJson && Array.isArray(fbJson.choices) && fbJson.choices[0];
+          const fbText = fbChoice && fbChoice.message && fbChoice.message.content;
+          if (typeof fbText === "string" && fbText.trim()) syntheticContent = fbText;
+        }
+      } catch {
+        /* fall through to the normal error path */
+      } finally {
+        clearTimeout(fbTimer);
+      }
+    }
+    if (!out.ok && !syntheticContent) {
       noStore(res);
       if (hasImage) {
         return res.status(502).json({
@@ -173,7 +209,7 @@ export default async function handler(req, res) {
         .status(502)
         .json({ error: "AI_CONNECTION_ERROR", detail });
     }
-    upstream = out.resp;
+    upstream = out.ok ? out.resp : null;
   } catch (e) {
     noStore(res);
     const timedOut = e && e.name === "AbortError";
@@ -200,6 +236,15 @@ export default async function handler(req, res) {
     res.write(line + "\n\n");
     if (typeof res.flush === "function") res.flush();
   };
+  // Non-stream fallback: emit the rescued answer as one sanitized SSE chunk
+  // so the frontend renders it exactly like a normal streamed reply.
+  if (syntheticContent && !upstream) {
+    write("data: " + JSON.stringify({ choices: [{ delta: { content: syntheticContent }, finish_reason: null }] }));
+    write("data: " + JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }));
+    write("data: [DONE]");
+    res.end();
+    return;
+  }
   let broken = false;
   let buf = "";
   const decoder = new TextDecoder();
