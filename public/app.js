@@ -81,6 +81,208 @@ function loadSettings() {
   } catch (e) {}
 }
 
+/* ================= Attached tools =================
+   The user attaches their OWN external AI tools (Grok, any OpenAI-compatible
+   API) with their OWN API key. The key is stored only in this browser's
+   localStorage — same pattern as the personal brain key — and is sent solely
+   to our own /api/tool endpoint, which proxies one request to the tool's
+   provider. All AI usage bills to the user's own provider account, so
+   attached tools cost Mojo nothing. In chat, "@name command" routes the
+   command to that tool instead of Mojo's brain. */
+const LS_TOOLS = "mojo.tools.v1";
+const TOOL_PRESETS = {
+  grok:   { name: "Grok", icon: "⚡", baseUrl: "https://api.x.ai/v1", model: "grok-4-1-fast" },
+  custom: { name: "",     icon: "🔌", baseUrl: "",                    model: "" },
+};
+let tools = [];
+
+function loadTools() {
+  tools = [];
+  try {
+    const raw = localStorage.getItem(LS_TOOLS);
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (Array.isArray(p)) {
+        tools = p.filter(t => t && t.id && t.name && t.baseUrl && t.model && t.key);
+      }
+    }
+  } catch (e) { tools = []; }
+}
+function saveTools() {
+  try { localStorage.setItem(LS_TOOLS, JSON.stringify(tools)); }
+  catch (e) { toast("Could not save the tool in this browser's storage."); }
+}
+/* The @command word for a tool, derived from its name: "My Tool" -> "my-tool". */
+function toolCmdName(t) {
+  const s = String((t && t.name) || "").toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return s || "tool";
+}
+function renderTools() {
+  const list = $("#toolList");
+  const count = $("#toolsCount");
+  if (!list) return;
+  list.innerHTML = "";
+  if (count) count.textContent = tools.length ? String(tools.length) : "";
+  if (!tools.length) {
+    const d = document.createElement("div");
+    d.className = "tools-empty";
+    d.textContent = "No tools attached yet.";
+    list.appendChild(d);
+    return;
+  }
+  for (const t of tools) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tool-item";
+    b.title = "Command " + t.name + " — or type @" + toolCmdName(t) + " in chat";
+    const ic = document.createElement("span");
+    ic.className = "tool-icon";
+    ic.textContent = t.icon || "🔌";
+    const nm = document.createElement("span");
+    nm.className = "tool-name";
+    nm.textContent = t.name;
+    const x = document.createElement("span");
+    x.className = "tool-detach";
+    x.textContent = "×";
+    x.title = "Detach " + t.name;
+    x.setAttribute("role", "button");
+    x.setAttribute("aria-label", "Detach " + t.name);
+    x.addEventListener("click", e => { e.stopPropagation(); detachTool(t.id); });
+    b.appendChild(ic); b.appendChild(nm); b.appendChild(x);
+    b.addEventListener("click", () => {
+      const ta = $("#input");
+      const prefix = "@" + toolCmdName(t) + " ";
+      if (ta && !ta.value.startsWith(prefix)) ta.value = prefix + ta.value;
+      if (isMobileLayout()) closeSidebar();
+      if (ta) { ta.focus(); autoresize(); }
+    });
+    list.appendChild(b);
+  }
+}
+function openToolModal() {
+  const err = $("#toolModalErr");
+  if (err) err.hidden = true;
+  applyToolPreset();
+  $("#toolModal").hidden = false;
+  setTimeout(() => { const n = $("#toolName"); if (n) n.focus(); }, 50);
+}
+function closeToolModal() { $("#toolModal").hidden = true; }
+function applyToolPreset() {
+  const p = TOOL_PRESETS[$("#toolPreset").value] || TOOL_PRESETS.custom;
+  $("#toolName").value = p.name;
+  $("#toolBaseUrl").value = p.baseUrl;
+  $("#toolModel").value = p.model;
+  $("#toolKey").value = "";
+}
+function attachToolFromModal() {
+  const err = $("#toolModalErr");
+  const fail = m => { err.textContent = m; err.hidden = false; };
+  const name = $("#toolName").value.trim().slice(0, 24);
+  const baseUrl = $("#toolBaseUrl").value.trim().replace(/\/+$/, "");
+  const key = $("#toolKey").value.trim();
+  const model = $("#toolModel").value.trim();
+  const preset = TOOL_PRESETS[$("#toolPreset").value] || TOOL_PRESETS.custom;
+  if (!name) return fail("Give the tool a name.");
+  if (!/^https:\/\//i.test(baseUrl)) return fail("Base URL must start with https://");
+  if (key.length < 8) return fail("Paste your API key for this tool.");
+  if (!model) return fail("Enter the model name.");
+  const cmd = toolCmdName({ name });
+  if (tools.some(t => toolCmdName(t) === cmd)) return fail("A tool with that name is already attached.");
+  tools.push({
+    id: "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    name, icon: preset.icon || "🔌", baseUrl, model, key,
+  });
+  saveTools();
+  renderTools();
+  closeToolModal();
+  toast(name + " attached, sir. Type @" + cmd + " in chat to command it.");
+}
+function detachTool(id) {
+  const t = tools.find(x => x.id === id);
+  if (!t) return;
+  if (!confirm("Detach " + t.name + "? Its key will be removed from this browser.")) return;
+  tools = tools.filter(x => x.id !== id);
+  saveTools();
+  renderTools();
+  toast(t.name + " detached.");
+}
+/* "@name command" in the composer routes the command to the attached tool
+   with the user's own key, instead of Mojo's brain. Runs inside the normal
+   conversation flow so the result is saved with the chat. */
+async function runToolCommand(tool, command) {
+  command = (command || "").trim();
+  if (!command || sending) return;
+  stopSpeak();
+  let c = getActive();
+  if (!c) c = createConversation();
+  const label = "@" + toolCmdName(tool) + " " + command;
+  c.messages.push({ role: "user", text: label, ts: Date.now() });
+  if (c.messages.filter(m => m.role === "user").length === 1) c.title = makeTitle(tool.name + ": " + command);
+  c.updatedAt = Date.now(); saveConvs();
+  $("#input").value = ""; autoresize();
+  renderSidebar($("#searchInput").value);
+  renderMessages();
+  sending = true;
+  const sendBtn = $("#sendBtn");
+  sendBtn.classList.add("stop");
+  sendBtn.setAttribute("aria-label", "Stop generating");
+  setCoreState("thinking");
+  appendThinking();
+  sendAbort = new AbortController();
+  stopReason = null;
+  const toolTimer = setTimeout(() => {
+    stopReason = "timeout";
+    try { sendAbort.abort(); } catch (e) {}
+  }, 60000);
+  try {
+    const res = await fetch("/api/tool", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        baseUrl: tool.baseUrl,
+        apiKey: tool.key, // the user's own key, proxied for this request only
+        model: tool.model,
+        message: command,
+      }),
+      signal: sendAbort.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    removeThinking();
+    if (!res.ok || data.error || !data.reply) {
+      const msg = "The tool couldn't run" +
+        (data && data.detail ? ": " + data.detail : ".") +
+        (stopReason === "timeout" ? "" : " Please try again.");
+      c.messages.push({ role: "error", text: "⚡ " + tool.name + " — " + msg, ts: Date.now() });
+      saveConvs();
+      appendErrorBubble("⚡ " + tool.name + " — " + msg);
+    } else {
+      const reply = String(data.reply);
+      c.messages.push({ role: "assistant", text: "⚡ " + tool.name + "\n" + reply, ts: Date.now() });
+      c.updatedAt = Date.now(); saveConvs();
+      appendMessageBubble("assistant", "⚡ " + tool.name + "\n" + reply, null, true, c.messages.length - 1);
+      speak(reply);
+    }
+  } catch (e) {
+    removeThinking();
+    if (!(e && e.name === "AbortError")) {
+      const msg = "Couldn't reach the server. Check your connection and try again.";
+      c.messages.push({ role: "error", text: msg, ts: Date.now() });
+      saveConvs();
+      appendErrorBubble(msg);
+    }
+    /* user-pressed stop: stay silent */
+  } finally {
+    clearTimeout(toolTimer);
+    sendAbort = null; stopReason = null;
+    sending = false;
+    sendBtn.classList.remove("stop");
+    sendBtn.setAttribute("aria-label", "Send message");
+    if (!listening) setCoreState("idle");
+    renderSidebar($("#searchInput").value);
+  }
+}
+
 /* ================= Conversations ================= */
 function getActive() { return conversations.find(c => c.id === activeId) || null; }
 function makeTitle(text) {
@@ -805,6 +1007,15 @@ async function sendMessage(text) {
   text = (text || "").trim();
   if (sending) return;
   if (!text && !attachedImage) return;
+  // "@tool command" routes to the user's attached tool (their own key),
+  // not to Mojo's brain.
+  if (!attachedImage) {
+    const tm = text.match(/^@([A-Za-z0-9_-]+)\s+([\s\S]+)$/);
+    if (tm) {
+      const tool = tools.find(t => toolCmdName(t) === tm[1].toLowerCase());
+      if (tool) { runToolCommand(tool, tm[2]); return; }
+    }
+  }
   stopSpeak();
   let c = getActive();
   if (!c) { c = createConversation(); }
@@ -1385,6 +1596,7 @@ function applySettingsUI() {
 /* ================= Init ================= */
 function init() {
   loadSettings();
+  loadTools();
   loadConvs();
   initAmbient();
   initCore();
@@ -1393,6 +1605,7 @@ function init() {
 
   applySettingsUI();
   renderSidebar("");
+  renderTools();
   renderMessages();
   refreshHealth();
 
@@ -1438,7 +1651,15 @@ function init() {
   } catch (e) {}
   $("#newChatBtn").addEventListener("click", startNewChat);
   $("#searchInput").addEventListener("input", e => renderSidebar(e.target.value));
-  $("#menuBtn").addEventListener("click", toggleSidebar);
+
+  // Attached tools
+  $("#attachToolBtn").addEventListener("click", openToolModal);
+  $("#toolModalClose").addEventListener("click", closeToolModal);
+  $("#toolModalCancel").addEventListener("click", closeToolModal);
+  $("#toolModal").addEventListener("click", e => { if (e.target.id === "toolModal") closeToolModal(); });
+  $("#toolPreset").addEventListener("change", applyToolPreset);
+  $("#toolAttach").addEventListener("click", attachToolFromModal);
+  $("#toolKey").addEventListener("keydown", e => { if (e.key === "Enter") attachToolFromModal(); });  $("#menuBtn").addEventListener("click", toggleSidebar);
   $("#scrim").addEventListener("click", closeSidebar);
 
   // Settings drawer
@@ -1470,9 +1691,9 @@ function init() {
     toast("All conversations deleted.");
   });
 
-  // Escape closes drawer / sidebar
+  // Escape closes drawer / sidebar / tool modal
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { closeDrawer(); closeSidebar(); }
+    if (e.key === "Escape") { closeToolModal(); closeDrawer(); closeSidebar(); }
   });
 }
 

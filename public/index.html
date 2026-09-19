@@ -28,6 +28,15 @@
       </label>
     </div>
     <nav id="convList" aria-label="Conversation history"></nav>
+    <section id="toolsSection" aria-label="Attached tools">
+      <div class="tools-head"><span>My tools</span><span id="toolsCount" class="tools-count"></span></div>
+      <div id="toolList"></div>
+      <button id="attachToolBtn" class="tool-add" type="button">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        Attach a tool
+      </button>
+      <p class="tools-note">Attach your own AI tools — Grok, or any OpenAI-compatible API — with your own key. Type <code>@tool</code> in chat to command it.</p>
+    </section>
     <div class="side-foot">Private · Server-backed · Mojo</div>
   </aside>
   <div id="scrim" aria-hidden="true"></div>
@@ -195,6 +204,47 @@
     <p class="set-note">Mojo runs privately on your server. API keys live in server environment variables — never in this app.</p>
   </div>
 </aside>
+
+<!-- ============ ATTACH TOOL MODAL ============ -->
+<div id="toolModal" class="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="toolModalTitle">
+    <div class="modal-head">
+      <h2 id="toolModalTitle">Attach a tool</h2>
+      <button id="toolModalClose" class="icon-btn" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p class="modal-sub">Connect one of your own AI tools. Its key is stored <strong>only in this browser</strong> — Mojo never keeps it.</p>
+    <label class="field">
+      <span>Tool</span>
+      <select id="toolPreset" class="text-input" aria-label="Tool preset">
+        <option value="grok">Grok (xAI)</option>
+        <option value="custom">Custom (OpenAI-compatible API)</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Name</span>
+      <input id="toolName" class="text-input" type="text" maxlength="24" placeholder="Grok" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="field">
+      <span>API base URL</span>
+      <input id="toolBaseUrl" class="text-input mono" type="url" placeholder="https://api.x.ai/v1" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="field">
+      <span>API key</span>
+      <input id="toolKey" class="text-input mono" type="password" placeholder="Paste your key" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="field">
+      <span>Model</span>
+      <input id="toolModel" class="text-input mono" type="text" maxlength="120" placeholder="grok-4-1-fast" autocomplete="off" spellcheck="false">
+    </label>
+    <p id="toolModalErr" class="field-err" hidden></p>
+    <div class="modal-actions">
+      <button id="toolModalCancel" class="btn-ghost" type="button">Cancel</button>
+      <button id="toolAttach" class="btn-primary" type="button">Attach tool</button>
+    </div>
+  </div>
+</div>
 
 <div id="toast" role="alert" hidden></div>
 
