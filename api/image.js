@@ -1,8 +1,10 @@
 // Free image generation for Mojo AI.
 //
 // Two providers, picked automatically:
-//   1. Hugging Face Inference (FLUX.1-schnell) when the HF_TOKEN env var is set —
-//      no watermark, better quality. The token is free; the user adds it in Vercel.
+//   1. Hugging Face Inference Providers (FLUX.1-schnell via nscale) when the
+//      HF_TOKEN env var is set — no watermark, better quality. The token is
+//      free; the user adds it in Vercel. (The classic serverless route no
+//      longer serves FLUX.1-schnell, so we go through the provider router.)
 //   2. Pollinations anonymous endpoint otherwise — free with no key, but every
 //      image carries the Pollinations watermark (their rule: nologo needs an
 //      account, and our nologo=true is still sent on the off chance it helps).
@@ -16,8 +18,9 @@ const IMAGE_TIMEOUT_MS = 55_000;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
 const MAX_ATTEMPTS = 3;
 
-const HF_URL =
-  "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell";
+const HF_PROVIDER_URL =
+  "https://router.huggingface.co/nscale/v1/images/generations";
+const HF_MODEL = "black-forest-labs/FLUX.1-schnell";
 const POLLINATIONS_BASE = "https://image.pollinations.ai/prompt";
 
 function fail(res, status, error, detail) {
@@ -52,22 +55,27 @@ async function cancelBody(resp) {
   } catch (e) {}
 }
 
-// Hugging Face path: POST the prompt, get raw image bytes back.
-// 503 usually means the model is cold-loading — honor its estimated_time.
+// Hugging Face path: FLUX.1-schnell through the Inference Providers router
+// (nscale). Same shape as the official @huggingface/inference client:
+// POST {prompt, model, response_format: "b64_json"} and decode data[0].b64_json.
+// Needs the token's "Make calls to Inference Providers" permission.
 async function generateViaHF(prompt, token, signal) {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (signal.aborted) throw abortError();
     let resp;
     try {
-      resp = await fetch(HF_URL, {
+      resp = await fetch(HF_PROVIDER_URL, {
         method: "POST",
         signal,
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
-          Accept: "image/*",
         },
-        body: JSON.stringify({ inputs: prompt }),
+        body: JSON.stringify({
+          prompt,
+          model: HF_MODEL,
+          response_format: "b64_json",
+        }),
       });
     } catch (e) {
       if (e && e.name === "AbortError") throw e;
@@ -75,22 +83,27 @@ async function generateViaHF(prompt, token, signal) {
       await sleep(attempt * 1000, signal);
       continue;
     }
-    if (resp.ok) return { ok: true, upstream: resp };
-    const status = resp.status;
-    let waitMs = attempt * 1000;
-    if (status === 503) {
+    if (resp.ok) {
+      let data = null;
       try {
-        const j = await resp.json();
-        if (j && typeof j.estimated_time === "number") {
-          waitMs = Math.min(Math.max(j.estimated_time * 1000, 1000), 20000);
-        }
-      } catch (e) {}
-    } else {
-      await cancelBody(resp);
+        data = await resp.json();
+      } catch (e) {
+        await cancelBody(resp);
+      }
+      const b64 =
+        data && data.data && data.data[0] && data.data[0].b64_json;
+      if (typeof b64 === "string" && b64.length > 0) {
+        return { ok: true, buffer: Buffer.from(b64, "base64") };
+      }
+      if (attempt === MAX_ATTEMPTS) return { ok: false };
+      await sleep(attempt * 1000, signal);
+      continue;
     }
+    const status = resp.status;
+    await cancelBody(resp);
     const retryable = status >= 500 || status === 429;
     if (!retryable || attempt === MAX_ATTEMPTS) return { ok: false, status };
-    await sleep(waitMs, signal);
+    await sleep(attempt * 1000, signal);
   }
   return { ok: false };
 }
@@ -205,7 +218,21 @@ export default async function handler(req, res) {
       const hf = await generateViaHF(prompt, hfToken, ctrl.signal);
       if (hf.ok) {
         clearTimeout(timer);
-        return pipeImage(res, hf.upstream);
+        const buf = hf.buffer;
+        if (!buf || buf.length === 0 || buf.length > MAX_IMAGE_BYTES) {
+          return fail(
+            res,
+            502,
+            "IMAGE_ERROR",
+            "The image service returned an unexpected response. Please try again."
+          );
+        }
+        res.writeHead(200, {
+          "Content-Type": "image/jpeg",
+          "Content-Length": String(buf.length),
+          "Cache-Control": "no-store",
+        });
+        return res.end(buf);
       }
       // A bad/revoked token is a config problem the user must fix — say so.
       if (hf.status === 401 || hf.status === 403) {
@@ -218,6 +245,8 @@ export default async function handler(req, res) {
         );
       }
       // Any other HF failure: fall through to Pollinations rather than erroring.
+      // Log the upstream status (code only, never the token) for diagnostics.
+      console.log("[image] hf upstream not ok, status:", hf.status ?? "network-error");
     }
     const out = await generateViaPollinations(prompt, ctrl.signal);
     clearTimeout(timer);
