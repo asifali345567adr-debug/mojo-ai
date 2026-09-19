@@ -816,11 +816,11 @@ function appendThinking() {
   const div = document.createElement("div");
   div.className = "msg assistant"; div.id = "thinkingRow";
   const av = document.createElement("div");
-  av.className = "avatar"; av.textContent = "M";
-  const dots = document.createElement("div");
-  dots.className = "thinking-dots";
-  dots.innerHTML = "<span></span><span></span><span></span>";
-  div.appendChild(av); div.appendChild(dots);
+  av.className = "avatar thinking-av"; av.textContent = "M";
+  const pill = document.createElement("div");
+  pill.className = "thinking-pill";
+  pill.innerHTML = '<span class="thinking-text">Thinking</span><span class="thinking-ellipsis"><span>.</span><span>.</span><span>.</span></span>';
+  div.appendChild(av); div.appendChild(pill);
   wrap.appendChild(div); scrollBottom();
 }
 function removeThinking() {
