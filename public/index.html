@@ -36,7 +36,7 @@
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         Attach a tool
       </button>
-      <p class="tools-note">Attach your own AI tools — Grok, or any OpenAI-compatible API — with your own key. Type <code>@tool</code> in chat to command it.</p>
+      <p class="tools-note">Attach your own AI tools — Grok, ChatGPT, Gemini, DeepSeek, Mistral, Perplexity and more — with your own key. Type <code>@tool</code> in chat to command it.</p>
     </section>
     <div class="side-foot">Private · Server-backed · Mojo</div>
   </aside>
@@ -220,6 +220,15 @@
       <span>Tool</span>
       <select id="toolPreset" class="text-input" aria-label="Tool preset">
         <option value="grok">Grok (xAI)</option>
+        <option value="chatgpt">ChatGPT (OpenAI)</option>
+        <option value="gemini">Gemini (Google)</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="mistral">Mistral</option>
+        <option value="perplexity">Perplexity</option>
+        <option value="groq">Groq</option>
+        <option value="together">Together AI</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="qwen">Qwen (Alibaba)</option>
         <option value="custom">Custom (OpenAI-compatible API)</option>
       </select>
     </label>
@@ -237,7 +246,7 @@
     </label>
     <label class="field">
       <span>Model</span>
-      <input id="toolModel" class="text-input mono" type="text" maxlength="120" placeholder="grok-4-1-fast" autocomplete="off" spellcheck="false">
+      <input id="toolModel" class="text-input mono" type="text" maxlength="120" placeholder="e.g. grok-4-1-fast" autocomplete="off" spellcheck="false">
     </label>
     <p id="toolModalErr" class="field-err" hidden></p>
     <div class="modal-actions">

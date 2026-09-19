@@ -91,8 +91,17 @@ function loadSettings() {
    command to that tool instead of Mojo's brain. */
 const LS_TOOLS = "mojo.tools.v1";
 const TOOL_PRESETS = {
-  grok:   { name: "Grok", icon: "⚡", baseUrl: "https://api.x.ai/v1", model: "grok-4-1-fast" },
-  custom: { name: "",     icon: "🔌", baseUrl: "",                    model: "" },
+  grok:       { name: "Grok",       icon: "⚡", baseUrl: "https://api.x.ai/v1", model: "grok-4-1-fast" },
+  chatgpt:    { name: "ChatGPT",    icon: "🤖", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  gemini:     { name: "Gemini",     icon: "✨", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/", model: "gemini-2.5-flash" },
+  deepseek:   { name: "DeepSeek",   icon: "🐳", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  mistral:    { name: "Mistral",    icon: "🌬️", baseUrl: "https://api.mistral.ai/v1", model: "mistral-small-latest" },
+  perplexity: { name: "Perplexity", icon: "🔎", baseUrl: "https://api.perplexity.ai", model: "sonar" },
+  groq:       { name: "Groq",       icon: "🚀", baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+  together:   { name: "Together",   icon: "🤝", baseUrl: "https://api.together.xyz/v1", model: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo" },
+  openrouter: { name: "OpenRouter", icon: "🔀", baseUrl: "https://openrouter.ai/api/v1", model: "" },
+  qwen:       { name: "Qwen",       icon: "🌙", baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  custom:     { name: "",           icon: "🔌", baseUrl: "", model: "" },
 };
 let tools = [];
 
