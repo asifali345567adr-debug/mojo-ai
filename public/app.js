@@ -1365,7 +1365,7 @@ function handleChatError(code, detail, status) {
     // detail is already sanitized server-side; never show provider internals.
     const clean = String(detail || "").replace(/https?:\/\/\S+/gi, "").trim();
     msg = "Mojo ran into a problem" + (clean ? ": " + clean : ".");
-    if (!/please try again\.?\s*$/i.test(clean)) msg += " Please try again.";
+    if (!/please try again/i.test(clean)) msg += " Please try again.";
   } else if (code === "NETWORK" || status === 0) {
     msg = "Couldn't reach the server. Check your connection and try again.";
   } else if (code === "empty_message") {
@@ -1373,7 +1373,7 @@ function handleChatError(code, detail, status) {
   } else {
     const clean = String(detail || "").replace(/https?:\/\/\S+/gi, "").trim();
     msg = "Something went wrong" + (clean && !/^\s*\{/.test(clean) ? ": " + clean : ".");
-    if (!/please try again\.?\s*$/i.test(clean)) msg += " Please try again.";
+    if (!/please try again/i.test(clean)) msg += " Please try again.";
   }
   const c = getActive();
   if (c) { c.messages.push({ role: "error", text: msg, ts: Date.now() }); saveConvs(); }
