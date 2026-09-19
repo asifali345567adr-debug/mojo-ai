@@ -829,6 +829,8 @@ function syncBrainKeyUI() {
   }
   const dot = $("#sideBrainDot");
   if (dot) dot.classList.toggle("on", has);
+  const rdot = $("#railBrainDot");
+  if (rdot) rdot.classList.toggle("on", has);
 }
 async function saveBrainKeyFrom(inputSel, noteSel) {
   const input = $(inputSel);
@@ -1861,6 +1863,19 @@ function init() {
   const railNew = $("#railNewChat"); if (railNew) railNew.addEventListener("click", startNewChat);
   const railAdd = $("#railAdd"); if (railAdd) railAdd.addEventListener("click", openToolModal);
   const railResearch = $("#railResearch"); if (railResearch) railResearch.addEventListener("click", openResearch);
+  const railBrain = $("#railBrain");
+  if (railBrain) railBrain.addEventListener("click", () => {
+    openSidebar();
+    setTimeout(() => {
+      const sec = $("#brainSection");
+      if (!sec) return;
+      try { sec.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {}
+      sec.classList.remove("flash");
+      void sec.offsetWidth;
+      sec.classList.add("flash");
+      setTimeout(() => sec.classList.remove("flash"), 1700);
+    }, isMobileLayout() ? 300 : 80);
+  });
   const sideResearch = $("#researchSideBtn"); if (sideResearch) sideResearch.addEventListener("click", openResearch);
 
   // Research modals

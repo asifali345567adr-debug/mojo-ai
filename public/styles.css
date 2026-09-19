@@ -589,6 +589,27 @@ textarea.text-input { resize: vertical; min-height: 66px; line-height: 1.5; font
 /* Research: a special tool — deep indigo tile so it stands apart, premium. */
 .rail-research { background: linear-gradient(135deg, #2e3a63 0%, #1d2545 100%); color: #dfe6ff; }
 .rail-research:hover { border-color: rgba(160,175,255,0.45); }
+/* Personal brain in the rail: white brain glyph, softly lit so it stands out even with the sidebar closed. */
+.rail-brain {
+  background: linear-gradient(135deg, #3b3b41 0%, #232327 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255,255,255,0.24);
+  box-shadow: 0 0 14px rgba(255,255,255,0.10), inset 0 0 10px rgba(255,255,255,0.05);
+}
+.rail-brain svg { filter: drop-shadow(0 0 5px rgba(255,255,255,0.55)); }
+.rail-brain:hover { border-color: rgba(255,255,255,0.55); box-shadow: 0 0 20px rgba(255,255,255,0.22); }
+.rail-brain-dot {
+  position: absolute; top: 7px; right: 7px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #8f8f95; border: 1.5px solid #1b1b1e;
+}
+.rail-brain-dot.on { background: #34c77b; box-shadow: 0 0 8px rgba(52,199,123,0.9); }
+/* Flash the brain section when jumping to it from the rail icon. */
+#brainSection.flash { animation: brainFlash 1.6s ease; border-radius: 12px; }
+@keyframes brainFlash {
+  0%, 100% { box-shadow: none; background: transparent; }
+  30%, 65% { box-shadow: 0 0 0 2px rgba(255,255,255,0.35); background: rgba(255,255,255,0.06); }
+}
 /* Premium hover labels on rail icons: the name glides out to the right. */
 .rail-tool { position: relative; }
 .rail-tool::after {
