@@ -5,13 +5,44 @@
 import { clientIp, rateLimited, noStore } from "./_lib.js";
 
 const POLLINATIONS_BASE = "https://image.pollinations.ai/prompt";
-const MAX_PROMPT_CHARS = 600;
+const MAX_PROMPT_CHARS = 2000;
 const IMAGE_TIMEOUT_MS = 55_000;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
+const MAX_ATTEMPTS = 3;
 
 function fail(res, status, error, detail) {
   noStore(res);
   return res.status(status).json({ error, detail });
+}
+
+// Pollinations is a free service and hiccups often (a 500 here, a dropped
+// connection there). Retry transient failures with backoff before ever
+// bothering the user — the same approach the chat endpoint uses for its
+// provider. Client errors (other 4xx) are final and are never retried.
+async function fetchWithRetries(url, signal) {
+  let lastStatus = 0;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (signal.aborted) {
+      const e = new Error("aborted");
+      e.name = "AbortError";
+      throw e;
+    }
+    try {
+      const upstream = await fetch(url, { signal });
+      if (upstream.ok) return { ok: true, upstream };
+      lastStatus = upstream.status;
+      try {
+        if (upstream.body && upstream.body.cancel) await upstream.body.cancel();
+      } catch (e) {}
+      const retryable = upstream.status >= 500 || upstream.status === 429;
+      if (!retryable || attempt === MAX_ATTEMPTS) break;
+    } catch (e) {
+      if (e && e.name === "AbortError") throw e;
+      if (attempt === MAX_ATTEMPTS) break;
+    }
+    await new Promise((r) => setTimeout(r, attempt * 1000));
+  }
+  return { ok: false, status: lastStatus };
 }
 
 export default async function handler(req, res) {
@@ -50,11 +81,8 @@ export default async function handler(req, res) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), IMAGE_TIMEOUT_MS);
   try {
-    const upstream = await fetch(url, { signal: ctrl.signal });
-    if (!upstream.ok) {
-      try {
-        if (upstream.body && upstream.body.cancel) await upstream.body.cancel();
-      } catch (e) {}
+    const out = await fetchWithRetries(url, ctrl.signal);
+    if (!out.ok) {
       return fail(
         res,
         502,
@@ -62,6 +90,7 @@ export default async function handler(req, res) {
         "The image service is temporarily down. Please try again in a little while."
       );
     }
+    const upstream = out.upstream;
     const contentType = upstream.headers.get("content-type") || "";
     if (!contentType.startsWith("image/")) {
       try {
