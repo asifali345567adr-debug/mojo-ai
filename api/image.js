@@ -11,10 +11,11 @@
 //
 // Images stream back through this function and are never stored on the server.
 
-import { clientIp, rateLimited, noStore } from "./_lib.js";
+import { clientIp, rateLimited, noStore, API_URL, API_KEY, MODEL, userKeyFromReq } from "./_lib.js";
 
 const MAX_PROMPT_CHARS = 2000;
 const IMAGE_TIMEOUT_MS = 55_000;
+const ENHANCE_TIMEOUT_MS = 12_000; // budget for AI prompt enhancement
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
 const MAX_ATTEMPTS = 3;
 
@@ -55,6 +56,82 @@ async function cancelBody(resp) {
   } catch (e) {}
 }
 
+// Detect the real image type from magic bytes. The HF provider returns PNG
+// bytes even though older code labelled them image/jpeg; a wrong MIME breaks
+// downloads (a PNG saved as .jpg). Sniff instead of trusting labels.
+function sniffMime(buf) {
+  if (!buf || buf.length < 12) return "image/png";
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47)
+    return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+  )
+    return "image/webp";
+  return "image/png";
+}
+
+// AI prompt enhancement: rewrite the user's (often short, sometimes Roman
+// Urdu) idea into a detailed English image prompt via the chat model. This is
+// the main lever for "photo accurate nahi ban raha" — FLUX follows a rich,
+// precise prompt far better than a 5-word one. Uses the caller's personal
+// brain key when present, else the server key. Never throws: on any failure
+// the caller falls back to the raw prompt.
+async function enhancePrompt(prompt, req, signal) {
+  const key = userKeyFromReq(req) || API_KEY;
+  if (!key) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => {
+    try { ctrl.abort(); } catch (e) {}
+  }, ENHANCE_TIMEOUT_MS);
+  const onAbort = () => { try { ctrl.abort(); } catch (e) {} };
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    const resp = await fetch(`${API_URL}/chat/completions`, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 220,
+        temperature: 0.7,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an expert prompt engineer for text-to-image AI models (FLUX). " +
+              "Rewrite the user's idea as ONE detailed, vivid English image prompt, 40-90 words. " +
+              "Cover: main subject, setting/background, lighting, composition, art style, and quality " +
+              "words (sharp focus, high detail, professional). If the idea is vague, make sensible " +
+              "concrete choices. Output ONLY the prompt text — no quotes, no preamble, no explanation.",
+          },
+          { role: "user", content: prompt.slice(0, 1000) },
+        ],
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json().catch(() => null);
+    const text =
+      data && data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content
+        : "";
+    const out = String(text || "")
+      .trim()
+      .replace(/^["'\u201c\u201d]+|["'\u201c\u201d]+$/g, "");
+    if (out.length < 10) return null;
+    return out.slice(0, 900);
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 // Hugging Face path: FLUX.1-schnell through the Inference Providers router
 // (nscale). Same shape as the official @huggingface/inference client:
 // POST {prompt, model, response_format: "b64_json"} and decode data[0].b64_json.
@@ -74,6 +151,7 @@ async function generateViaHF(prompt, token, signal) {
         body: JSON.stringify({
           prompt,
           model: HF_MODEL,
+          size: "1024x1024",
           response_format: "b64_json",
         }),
       });
@@ -132,7 +210,7 @@ async function generateViaPollinations(prompt, signal) {
 }
 
 // Validate and stream the image bytes to the client with a hard byte cap.
-async function pipeImage(res, upstream) {
+async function pipeImage(res, upstream, provider) {
   const contentType = upstream.headers.get("content-type") || "";
   if (!contentType.startsWith("image/")) {
     await cancelBody(upstream);
@@ -178,6 +256,7 @@ async function pipeImage(res, upstream) {
     "Content-Type": contentType.split(";")[0],
     "Content-Length": String(total),
     "Cache-Control": "no-store",
+    "X-Image-Provider": provider || "pollinations",
   });
   return res.end(Buffer.concat(chunks));
 }
@@ -213,9 +292,13 @@ export default async function handler(req, res) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), IMAGE_TIMEOUT_MS);
   try {
+    // Expand the raw idea into a detailed image prompt first — the single
+    // biggest accuracy lever. Falls back to the raw prompt on any failure.
+    const enhanced = await enhancePrompt(prompt, req, ctrl.signal);
+    const finalPrompt = enhanced || prompt;
     // Prefer Hugging Face (no watermark) when a token is configured.
     if (hfToken) {
-      const hf = await generateViaHF(prompt, hfToken, ctrl.signal);
+      const hf = await generateViaHF(finalPrompt, hfToken, ctrl.signal);
       if (hf.ok) {
         clearTimeout(timer);
         const buf = hf.buffer;
@@ -228,9 +311,10 @@ export default async function handler(req, res) {
           );
         }
         res.writeHead(200, {
-          "Content-Type": "image/jpeg",
+          "Content-Type": sniffMime(buf),
           "Content-Length": String(buf.length),
           "Cache-Control": "no-store",
+          "X-Image-Provider": "huggingface",
         });
         return res.end(buf);
       }
@@ -248,7 +332,7 @@ export default async function handler(req, res) {
       // Log the upstream status (code only, never the token) for diagnostics.
       console.log("[image] hf upstream not ok, status:", hf.status ?? "network-error");
     }
-    const out = await generateViaPollinations(prompt, ctrl.signal);
+    const out = await generateViaPollinations(finalPrompt, ctrl.signal);
     clearTimeout(timer);
     if (!out.ok) {
       return fail(
@@ -258,7 +342,7 @@ export default async function handler(req, res) {
         "The image service is temporarily down. Please try again in a little while."
       );
     }
-    return pipeImage(res, out.upstream);
+    return pipeImage(res, out.upstream, "pollinations");
   } catch (e) {
     clearTimeout(timer);
     const timedOut = e && e.name === "AbortError";
