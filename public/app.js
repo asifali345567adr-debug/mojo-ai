@@ -1921,7 +1921,7 @@ function init() {
   loadTools();
   loadConvs();
   initAmbient();
-  if (!isMobileLayout()) initCore(); /* mobile app-style UI hides the core stage */
+  initCore(); /* animated core shows on mobile too */
   loadVoices();
   if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = loadVoices;
 
