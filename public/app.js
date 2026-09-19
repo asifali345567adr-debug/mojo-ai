@@ -222,7 +222,7 @@ function buildMesh() {
       const dx = meshPts[sp.i].bx - q.bx, dy = meshPts[sp.i].by - q.by;
       if (dx * dx + dy * dy < cell * cell * 2.2) { ok = false; break; }
     }
-    if (ok) taken.push({ i, ph: Math.random() * 6.283, rate: 0.7 + Math.random() * 1.1, s: 0.7 + Math.random() * 0.9 });
+    if (ok) taken.push({ i, ph: Math.random() * 6.283, rate: 0.7 + Math.random() * 1.1, s: 0.9 + Math.random() * 1.0 });
   }
   sparkles = taken;
   for (let i = 0; i < 56; i++) {
@@ -255,11 +255,11 @@ function drawGlintSpark(ctx, x, y, s, alpha) {
   ];
   ctx.save(); ctx.translate(x, y);
   for (const rd of rays) {
-    const L = s * 11 * rd[2], dx = rd[0], dy = rd[1];
+    const L = s * 14 * rd[2], dx = rd[0], dy = rd[1];
     const g = ctx.createLinearGradient(0, 0, dx * L, dy * L);
     g.addColorStop(0, "rgba(15,17,23," + a + ")");
     g.addColorStop(1, "rgba(15,17,23,0)");
-    ctx.strokeStyle = g; ctx.lineWidth = 1.1;
+    ctx.strokeStyle = g; ctx.lineWidth = 1.3;
     ctx.beginPath(); ctx.moveTo(dx * -L * 0.22, dy * -L * 0.22); ctx.lineTo(dx * L, dy * L); ctx.stroke();
   }
   const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 2.6);
@@ -299,8 +299,8 @@ function drawCore(t) {
     px[i] = m.bx + Math.sin(t * 0.50 * p.drift + m.phx) * m.ax;
     py[i] = m.by + Math.cos(t * 0.42 * p.drift + m.phy) * m.ay;
   }
-  ctx.lineWidth = 1.0;
-  ctx.strokeStyle = "rgba(12,14,20," + al(0.72 * glow) + ")";
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = "rgba(10,12,18," + al(0.55 + 0.45 * glow) + ")";
   ctx.beginPath();
   for (const e of meshEdges) { ctx.moveTo(px[e[0]], py[e[0]]); ctx.lineTo(px[e[1]], py[e[1]]); }
   ctx.stroke();
