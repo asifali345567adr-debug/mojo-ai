@@ -10,6 +10,7 @@ const LS_CONV = "mojo.conversations.v1";
 const LS_ACTIVE = "mojo.active.v1";
 const LS_SETTINGS = "mojo.settings.v1";
 const LS_BRAIN_KEY = "mojo.brain.key.v1"; // personal API key, stored only in this browser
+const LS_NOTES = "mojo.notes.v1"; // things the user asked Mojo to remember, stored only in this browser
 
 /* Personal brain key: the user can paste their own OpenRouter API key in
    Settings → Connection. It never leaves the device except as the X-Brain-Key
@@ -17,6 +18,17 @@ const LS_BRAIN_KEY = "mojo.brain.key.v1"; // personal API key, stored only in th
    instead of the server key. The key value is never written into the page. */
 function getBrainKey() {
   try { return localStorage.getItem(LS_BRAIN_KEY) || ""; } catch (e) { return ""; }
+}
+/* Memory: free-text notes the user asked Mojo to remember. Stored only in
+   this browser; sent with each chat request so every reply can use them. */
+function getNotes() {
+  try { return localStorage.getItem(LS_NOTES) || ""; } catch (e) { return ""; }
+}
+function saveNotes() {
+  const v = ((($("#notesInput") || {}).value) || "").trim().slice(0, 1200);
+  try { localStorage.setItem(LS_NOTES, v); }
+  catch (e) { toast("Could not save in this browser's storage."); return; }
+  toast(v ? "Memory saved, sir." : "Memory cleared.");
 }
 function brainKeyHeaders(extra) {
   const k = getBrainKey();
@@ -946,7 +958,7 @@ async function sendMessage(text) {
   sendBtn.setAttribute("aria-label", "Stop generating");
   setCoreState("thinking");
   appendThinking();
-  const payload = { message: userText, history: historyPayload(c) };
+  const payload = { message: userText, history: historyPayload(c), notes: getNotes() };
   if (img) payload.image = img;
   sendAbort = new AbortController();
   stopReason = null;
@@ -1501,6 +1513,9 @@ function init() {
   $("#drawerScrim").addEventListener("click", closeDrawer);
   $("#refreshHealth").addEventListener("click", () => { refreshHealth(); toast("Checking server status…"); });
   $("#saveBrainKey").addEventListener("click", saveBrainKey);
+  const notesInput = $("#notesInput");
+  if (notesInput) notesInput.value = getNotes();
+  $("#saveNotes").addEventListener("click", saveNotes);
   $("#removeBrainKey").addEventListener("click", removeBrainKey);
   $("#brainKeyInput").addEventListener("keydown", e => { if (e.key === "Enter") saveBrainKey(); });
   $("#tglVoice").addEventListener("change", e => { settings.voiceInput = e.target.checked; saveSettings(); });

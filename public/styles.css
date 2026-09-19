@@ -417,6 +417,7 @@ body {
 }
 .text-input:focus { border-color: rgba(255,138,42,0.6); }
 .text-input::placeholder { color: var(--faint); font-family: var(--font); }
+textarea.text-input { resize: vertical; min-height: 66px; line-height: 1.5; font-family: var(--font); }
 .set-key-block { margin-top: 12px; }
 .set-key-label { font-size: 13px; color: var(--text); font-weight: 600; }
 .set-key-btns { display: flex; gap: 8px; }
