@@ -1116,7 +1116,7 @@ function updateImgPreview() {
 }
 
 /* ================= Free image generation (Pollinations, no key needed) ================= */
-const IMAGE_TIMEOUT_MS = 60000;
+const IMAGE_TIMEOUT_MS = 75000;
 let generatingImage = false;
 async function generateImage() {
   const prompt = ($("#input").value || "").trim();
