@@ -323,8 +323,8 @@ async function runToolCommand(tool, command) {
 
 /* ================= Web Research: live web + Mojo's brief =================
    Research is a special tool with its own icon in the rail and sidebar.
-   It searches the live web with the USER'S OWN Brave Search key (free
-   2,000 searches/month at brave.com/search/api), then Mojo's brain writes
+   It searches the live web with the USER'S OWN Tavily API key (free
+   1,000 searches/month at tavily.com, no card), then Mojo's brain writes
    a sourced brief. The key lives only in this browser — like other tools. */
 const LS_RESEARCH_KEY = "mojo.researchKey.v1";
 function getResearchKey() {
@@ -351,7 +351,7 @@ function saveResearchKey() {
   const err = $("#researchKeyErr");
   const fail = m => { if (err) { err.textContent = m; err.hidden = false; } };
   const key = (($("#researchKeyInput") || {}).value || "").trim();
-  if (key.length < 8) return fail("Paste your Brave Search API key.");
+  if (key.length < 8) return fail("Paste your Tavily API key.");
   try { localStorage.setItem(LS_RESEARCH_KEY, key); }
   catch (e) { return fail("Could not save in this browser's storage."); }
   closeResearchKeyModal();
@@ -387,7 +387,7 @@ async function runResearch(query) {
   query = (query || "").trim();
   if (!query || sending) return;
   const key = getResearchKey();
-  if (!key) { openResearchKeyModal(); toast("Attach your free Brave Search key first, sir."); return; }
+  if (!key) { openResearchKeyModal(); toast("Attach your free Tavily key first, sir."); return; }
   stopSpeak();
   let c = getActive();
   if (!c) c = createConversation();
@@ -813,12 +813,12 @@ function renderStatus() {
 
 /* ================= Personal brain key ================= */
 function setBrainKeyNote(t, noteSel) {
-  const n = $(noteSel || "#brainKeyNote");
+  const n = $(noteSel || "#sideBrainNote");
   if (n) n.textContent = t;
 }
 function syncBrainKeyUI() {
   const has = !!getBrainKey();
-  for (const [inputSel, noteSel] of [["#brainKeyInput", "#brainKeyNote"], ["#sideBrainKeyInput", "#sideBrainNote"]]) {
+  for (const [inputSel, noteSel] of [["#sideBrainKeyInput", "#sideBrainNote"]]) {
     const input = $(inputSel);
     if (!input) continue;
     input.value = "";
@@ -856,7 +856,7 @@ async function saveBrainKeyFrom(inputSel, noteSel) {
     setBrainKeyNote("Could not reach the server. Key not saved.", noteSel);
   }
 }
-function saveBrainKey() { return saveBrainKeyFrom("#brainKeyInput", "#brainKeyNote"); }
+
 function removeBrainKey() {
   try { localStorage.removeItem(LS_BRAIN_KEY); } catch (e) {}
   syncBrainKeyUI();
@@ -1213,7 +1213,7 @@ async function sendMessage(text) {
   if (!attachedImage) {
     const tm = text.match(/^@([A-Za-z0-9_-]+)\s+([\s\S]+)$/);
     if (tm) {
-      /* @research is Mojo's special web-research tool (user's own Brave key). */
+      /* @research is Mojo's special web-research tool (user's own Tavily key). */
       if (tm[1].toLowerCase() === "research") { runResearch(tm[2]); return; }
       const tool = tools.find(t => toolCmdName(t) === tm[1].toLowerCase());
       if (tool) { runToolCommand(tool, tm[2]); return; }
@@ -1892,12 +1892,12 @@ function init() {
   $("#drawerClose").addEventListener("click", closeDrawer);
   $("#drawerScrim").addEventListener("click", closeDrawer);
   $("#refreshHealth").addEventListener("click", () => { refreshHealth(); toast("Checking server status…"); });
-  $("#saveBrainKey").addEventListener("click", saveBrainKey);
+
   const notesInput = $("#notesInput");
   if (notesInput) notesInput.value = getNotes();
   $("#saveNotes").addEventListener("click", saveNotes);
-  $("#removeBrainKey").addEventListener("click", removeBrainKey);
-  $("#brainKeyInput").addEventListener("keydown", e => { if (e.key === "Enter") saveBrainKey(); });
+  
+  
   $("#tglVoice").addEventListener("change", e => { settings.voiceInput = e.target.checked; saveSettings(); });
   $("#tglTTS").addEventListener("change", e => {
     settings.tts = e.target.checked; saveSettings();
