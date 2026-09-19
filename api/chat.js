@@ -185,19 +185,72 @@ export default async function handler(req, res) {
     });
   }
 
-  // Stream the provider's SSE straight through so words appear instantly.
+  // Privacy: do NOT stream the provider's raw SSE through. Providers embed
+  // model names, request ids, timestamps, usage stats, and invisible
+  // "reasoning" tokens in their stream. Instead, re-emit a sanitized Mojo
+  // stream carrying only the visible assistant text plus the [DONE] marker —
+  // nothing a curious user could use to identify the provider.
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
     "X-Accel-Buffering": "no",
   });
+  const write = (line) => {
+    res.write(line + "\n\n");
+    if (typeof res.flush === "function") res.flush();
+  };
   let broken = false;
+  let buf = "";
+  const decoder = new TextDecoder();
+  const handleLine = (line) => {
+    if (!line.startsWith("data:")) return; // drop comments / keep-alives
+    const payload = line.slice(5).trim();
+    if (payload === "[DONE]") {
+      write("data: [DONE]");
+      return;
+    }
+    let j;
+    try {
+      j = JSON.parse(payload);
+    } catch {
+      return; // malformed fragment: never leak it raw
+    }
+    if (j && j.error) {
+      write('data: {"error":"STREAM_ERROR"}'); // neutral, no provider detail
+      return;
+    }
+    const choice = j && Array.isArray(j.choices) && j.choices[0];
+    if (!choice) return;
+    const delta = choice.delta || {};
+    const content = typeof delta.content === "string" ? delta.content : "";
+    // reasoning tokens are never forwarded: they are invisible thinking,
+    // not part of the visible answer.
+    if (content || choice.finish_reason) {
+      const clean = {
+        choices: [
+          {
+            delta: content ? { content } : {},
+            finish_reason: choice.finish_reason || null,
+          },
+        ],
+      };
+      write("data: " + JSON.stringify(clean));
+    }
+  };
   try {
     for await (const chunk of upstream.body) {
-      res.write(chunk);
-      if (typeof res.flush === "function") res.flush();
+      buf += decoder.decode(chunk, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (line) handleLine(line);
+      }
     }
+    buf += decoder.decode();
+    const tail = buf.trim();
+    if (tail) handleLine(tail);
   } catch {
     broken = true; // client went away or the provider broke mid-stream
   }
