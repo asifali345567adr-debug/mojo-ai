@@ -1115,6 +1115,78 @@ function updateImgPreview() {
   else { box.hidden = true; $("#imgPrevImg").removeAttribute("src"); }
 }
 
+/* ================= Free image generation (Pollinations, no key needed) ================= */
+const IMAGE_TIMEOUT_MS = 60000;
+let generatingImage = false;
+async function generateImage() {
+  const prompt = ($("#input").value || "").trim();
+  if (generatingImage || sending) return;
+  if (!prompt) { toast("Describe the image first, then tap the image button."); return; }
+  stopSpeak();
+  let c = getActive();
+  if (!c) { c = createConversation(); }
+  c.messages.push({ role: "user", text: prompt, ts: Date.now() });
+  if (c.messages.filter(m => m.role === "user").length === 1) c.title = makeTitle(prompt);
+  c.updatedAt = Date.now(); saveConvs();
+  $("#input").value = ""; autoresize();
+  renderSidebar($("#searchInput").value);
+  renderMessages();
+  generatingImage = true;
+  setCoreState("thinking");
+  appendThinking();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, IMAGE_TIMEOUT_MS);
+  try {
+    const res = await fetch("/api/image", {
+      method: "POST",
+      headers: brainKeyHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ prompt }),
+      signal: ctrl.signal
+    });
+    const ct = res.headers.get("content-type") || "";
+    removeThinking();
+    if (!res.ok || !ct.startsWith("image/")) {
+      const data = await res.json().catch(() => ({}));
+      handleImageError(data.error, data.detail, res.status);
+    } else {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      // The blob URL lives only for this page session: it is shown now but
+      // never written to history, so a reload can never leave a broken image.
+      c.messages.push({ role: "assistant", text: "Image generated — shown above (this session only).", ts: Date.now() });
+      c.updatedAt = Date.now(); saveConvs();
+      appendMessageBubble("assistant", "Here's your image, sir.", url, true);
+      renderSidebar($("#searchInput").value);
+    }
+  } catch (e) {
+    removeThinking();
+    if (e && e.name === "AbortError") handleImageError("IMAGE_TIMEOUT", "", 0);
+    else handleImageError("NETWORK", "", 0);
+  } finally {
+    clearTimeout(timer);
+    generatingImage = false;
+    if (!listening) setCoreState("idle");
+  }
+}
+function handleImageError(code, detail, status) {
+  let msg;
+  if (code === "RATE_LIMITED") {
+    msg = "Too many image requests — please wait a moment and try again.";
+  } else if (code === "EMPTY_PROMPT") {
+    msg = "Describe the image first, then tap the image button.";
+  } else if (code === "PROMPT_TOO_LONG") {
+    msg = detail || "That description is too long. Please shorten it and try again.";
+  } else if (code === "IMAGE_TIMEOUT" || status === 504) {
+    msg = "Image generation took too long. Please try again.";
+  } else if (code === "NETWORK" || status === 0) {
+    msg = "Couldn't reach the image service. Check your connection and try again.";
+  } else {
+    msg = detail || "The image service is temporarily down. Please try again in a little while.";
+  }
+  const c = getActive();
+  if (c) { c.messages.push({ role: "error", text: msg, ts: Date.now() }); saveConvs(); }
+  appendErrorBubble(msg);
+}
 /* ================= Composer ================= */
 function autoresize() {
   const ta = $("#input");
@@ -1178,6 +1250,8 @@ function init() {
   $("#attachBtn").addEventListener("click", () => $("#fileInput").click());
   $("#fileInput").addEventListener("change", e => { handleFile(e.target.files[0]); e.target.value = ""; });
   $("#imgRemove").addEventListener("click", () => { attachedImage = null; updateImgPreview(); });
+  // Free image generation
+  $("#imageBtn").addEventListener("click", generateImage);
 
   // Voice
   $("#micBtn").addEventListener("click", toggleListening);
