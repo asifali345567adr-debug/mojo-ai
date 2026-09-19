@@ -5,10 +5,11 @@
 //      HF_TOKEN env var is set — no watermark, better quality. The token is
 //      free; the user adds it in Vercel. (The classic serverless route no
 //      longer serves FLUX.1-schnell, so we go through the provider router.)
-//   2. Pollinations (free) — same FLUX quality. Anonymous calls carry their
-//      watermark, but with a free Pollinations account token (POLLINATIONS_KEY
-//      env var, "Seed" tier) the nologo=true flag actually removes it, so the
-//      fallback is watermark-free too. No key? Falls back to anonymous.
+//   2. Pollinations unified API (free account, POLLINATIONS_KEY env var) —
+//      same FLUX quality, and authenticated requests come back with NO
+//      watermark (the legacy image.pollinations.ai endpoint now stamps its
+//      logo even with nologo=true, so we use gen.pollinations.ai instead).
+//      No key? Falls back to anonymous legacy (may carry a watermark).
 //
 // Images stream back through this function and are never stored on the server.
 
@@ -20,14 +21,15 @@ const ENHANCE_TIMEOUT_MS = 12_000; // budget for AI prompt enhancement
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
 const MAX_ATTEMPTS = 3;
 
-// Optional: free Pollinations account token ("Seed" tier) from
-// https://auth.pollinations.ai — enables watermark-free nologo fallback.
+// Optional: free Pollinations account token from https://enter.pollinations.ai
+// — sent as a Bearer token to the unified API (gen.pollinations.ai), whose
+// authenticated image responses carry no watermark.
 const POLLINATIONS_KEY = process.env.POLLINATIONS_KEY || "";
 
 const HF_PROVIDER_URL =
   "https://router.huggingface.co/nscale/v1/images/generations";
 const HF_MODEL = "black-forest-labs/FLUX.1-schnell";
-const POLLINATIONS_BASE = "https://image.pollinations.ai/prompt";
+const POLLINATIONS_BASE = "https://gen.pollinations.ai/image";
 
 function fail(res, status, error, detail) {
   noStore(res);
@@ -192,13 +194,19 @@ async function generateViaHF(prompt, token, signal) {
 }
 
 // Pollinations path: plain GET; retries transient 5xx/429 with backoff.
-// When POLLINATIONS_KEY is set (free account token), it is sent as a Bearer
-// token so nologo=true is honored and the image comes back watermark-free.
+// Uses the unified API (gen.pollinations.ai): when POLLINATIONS_KEY is set,
+// it is sent as a Bearer token and the image comes back with no watermark.
+// (The legacy image.pollinations.ai endpoint now stamps its logo even with
+// nologo=true, so it is only used as a last-resort anonymous fallback when
+// no key is configured.)
 async function generateViaPollinations(prompt, signal) {
+  const authed = !!POLLINATIONS_KEY;
+  const base = authed ? POLLINATIONS_BASE : "https://image.pollinations.ai/prompt";
   const url =
-    `${POLLINATIONS_BASE}/${encodeURIComponent(prompt)}` +
-    "?width=1024&height=1024&model=flux&nologo=true&private=true&enhance=true";
-  const headers = POLLINATIONS_KEY
+    `${base}/${encodeURIComponent(prompt)}` +
+    "?width=1024&height=1024&model=flux&private=true" +
+    (authed ? "" : "&nologo=true");
+  const headers = authed
     ? { Authorization: `Bearer ${POLLINATIONS_KEY}` }
     : {};
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
