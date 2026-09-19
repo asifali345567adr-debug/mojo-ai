@@ -77,7 +77,7 @@ export default async function handler(req, res) {
   // single shared deadline let one slow model burn the whole budget and the
   // user got "took too long" without the fallback ever being tried. An overall
   // cap (PROVIDER_TIMEOUT_MS) still bounds the whole attempt.
-  const PER_MODEL_TIMEOUT_MS = 18000;
+  const PER_MODEL_TIMEOUT_MS = 12000;
   let upstream;
   try {
     const overall = new AbortController();
@@ -135,7 +135,12 @@ export default async function handler(req, res) {
         }
         if (out.ok) break;
         const s = out.status || 0;
-        if (s !== 0 && s < 500 && s !== 429) break; // client error: final
+        // A 404 means this model id no longer exists on the provider (common
+        // on the free tier) — try the next model, don't give up. Same for rate
+        // limits (429), server errors (5xx), and network failures (0). Other
+        // 4xx errors (bad key, bad payload) are final.
+        if (s === 404 || s === 429 || s === 0 || s >= 500) continue;
+        break;
       }
     } finally {
       clearTimeout(overallTimer);
