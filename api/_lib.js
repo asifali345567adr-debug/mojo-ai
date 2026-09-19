@@ -219,15 +219,31 @@ export async function providerPost(url, bodyObj, signal, attempts = 3, apiKey = 
   return { ok: false, status: lastStatus, detail: detail || `provider HTTP ${lastStatus}` };
 }
 
-// When OpenRouter's free daily quota is exhausted, say so honestly instead of
-// "temporarily down": the user needs to know it resets at midnight UTC, and
-// that a one-time $10 credit purchase unlocks 1,000 free requests/day.
+// Public quota message: never leak provider internals (provider names, credit
+// deals) to app users. Just say honestly when Mojo is back, with a live
+// countdown to the midnight-UTC quota reset.
+function quotaResetIn() {
+  const now = new Date();
+  const reset = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1,
+    0, 0, 0
+  );
+  const mins = Math.max(1, Math.round((reset - now.getTime()) / 60000));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const hs = h + " hour" + (h === 1 ? "" : "s");
+  const ms = m + " minute" + (m === 1 ? "" : "s");
+  return h > 0 ? hs + " " + ms : ms;
+}
 export function friendlyDetail(detail, fallback) {
   const d = String(detail || "");
   if (/per-day/i.test(d))
     return (
-      "Today's free AI quota is used up — it resets at midnight UTC. " +
-      "For 1,000 free requests/day, add a one-time $10 credit on your OpenRouter account (free models stay $0)."
+      "Mojo's free daily limit is used up — back in about " +
+      quotaResetIn() +
+      ". Please try again then."
     );
   return d || fallback;
 }
