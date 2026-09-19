@@ -856,7 +856,15 @@ async function streamAssistantReply(res, onChunk) {
   const sc = $("#chatScroll");
   sc.classList.add("streaming");
   sc.setAttribute("aria-busy", "true");
-  const bodyEl = appendMessageBubble("assistant", "", null, false);
+  // The bubble is created lazily on the first token, so the "Thinking"
+  // indicator stays visible until real text arrives — no blank gap.
+  let bodyEl = null;
+  const ensureBubble = () => {
+    if (bodyEl) return bodyEl;
+    removeThinking();
+    bodyEl = appendMessageBubble("assistant", "", null, false);
+    return bodyEl;
+  };
   let acc = "";
   let lastRender = 0;
   try {
@@ -886,7 +894,7 @@ async function streamAssistantReply(res, onChunk) {
           const now = performance.now();
           if (now - lastRender > 120) {
             lastRender = now;
-            bodyEl.innerHTML = renderMarkdown(acc);
+            ensureBubble().innerHTML = renderMarkdown(acc);
             scrollBottom(false);
           }
         }
@@ -896,6 +904,7 @@ async function streamAssistantReply(res, onChunk) {
   } catch (e) {
     // stream interrupted (user stopped, timed out, connection dropped); keep what arrived
   }
+  bodyEl = ensureBubble();
   bodyEl.innerHTML = renderMarkdown(acc);
   scrollBottom(false);
   sc.classList.remove("streaming");
@@ -958,7 +967,6 @@ async function sendMessage(text) {
       removeThinking();
       handleChatError(data.error, data.detail, res.status);
     } else if (ct.includes("text/event-stream") && res.body) {
-      removeThinking();
       speakStreamStart(); // streaming TTS: first sentence speaks the moment it arrives
       const { text: streamed, bodyEl } = await streamAssistantReply(res, speakStreamChunk);
       const row = bodyEl.closest(".msg");
