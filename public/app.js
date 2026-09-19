@@ -167,8 +167,8 @@ function initAmbient() {
     for (const d of dots) {
       d.x = (d.x + d.vx + 1) % 1; d.y = (d.y + d.vy + 1) % 1;
       const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 0.0004 + d.ph));
-      ctx.fillStyle = d.blue ? "rgba(147,217,255," + (0.10 * tw).toFixed(3) + ")"
-                             : "rgba(255,150,60," + (0.13 * tw).toFixed(3) + ")";
+      ctx.fillStyle = d.blue ? "rgba(120,155,200," + (0.10 * tw).toFixed(3) + ")"
+                             : "rgba(105,120,145," + (0.13 * tw).toFixed(3) + ")";
       ctx.beginPath(); ctx.arc(d.x * W, d.y * H, d.s, 0, 7); ctx.fill();
     }
   }
@@ -235,7 +235,7 @@ function buildBinStrip() {
     const blue = Math.random() < 0.4;
     for (let y = 6; y < h; y += 13) {
       if (Math.random() < 0.28) continue;
-      c.fillStyle = blue ? "rgba(120,180,230,0.10)" : "rgba(230,150,70,0.10)";
+      c.fillStyle = blue ? "rgba(120,180,230,0.10)" : "rgba(130,145,170,0.10)";
       c.fillText(Math.random() < 0.5 ? "0" : "1", x, y);
     }
   }
@@ -276,15 +276,15 @@ function drawCore(t) {
 
   // 2. Ambient aura
   let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, sR * 3.1);
-  g.addColorStop(0, "rgba(255,150,50," + al(0.34 * glow) + ")");
-  g.addColorStop(0.4, "rgba(255,120,30," + al(0.16 * glow) + ")");
-  g.addColorStop(0.7, "rgba(130,190,255," + al(0.14 * glow * (0.4 + p.blueMix)) + ")");
+  g.addColorStop(0, "rgba(105,120,145," + al(0.34 * glow) + ")");
+  g.addColorStop(0.4, "rgba(130,145,170," + al(0.16 * glow) + ")");
+  g.addColorStop(0.7, "rgba(150,175,210," + al(0.14 * glow * (0.4 + p.blueMix)) + ")");
   g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, coreW, coreH);
   // Hot inner halo — the "lit from within" premium glow.
   const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, sR * 1.9);
-  g2.addColorStop(0, "rgba(255,170,80," + al(0.20 * glow) + ")");
-  g2.addColorStop(1, "rgba(255,150,60,0)");
+  g2.addColorStop(0, "rgba(140,155,180," + al(0.20 * glow) + ")");
+  g2.addColorStop(1, "rgba(105,120,145,0)");
   ctx.fillStyle = g2; ctx.fillRect(0, 0, coreW, coreH);
 
   // 3. Tilted orbit ring (back half first, front half after the globe)
@@ -297,11 +297,11 @@ function drawCore(t) {
     ctx.beginPath(); ctx.arc(0, 0, ringR, a0, a1); ctx.stroke();
     ctx.restore();
   };
-  strokeRing(Math.PI, Math.PI * 2, "rgba(147,217,255," + al(0.45 * glow) + ")", 1.6, 8);
+  strokeRing(Math.PI, Math.PI * 2, "rgba(120,155,200," + al(0.45 * glow) + ")", 1.6, 8);
 
   // Thin dashed orbit ring, slow counter-rotation.
   ctx.save(); ctx.translate(cx, cy); ctx.rotate(0.5); ctx.scale(1, 0.55);
-  ctx.strokeStyle = "rgba(255,170,90," + al(0.30 * glow) + ")";
+  ctx.strokeStyle = "rgba(140,155,180," + al(0.30 * glow) + ")";
   ctx.lineWidth = 1; ctx.setLineDash([3, 7]); ctx.lineDashOffset = -t * 14;
   ctx.beginPath(); ctx.arc(0, 0, sR * 1.38, 0, 7); ctx.stroke();
   ctx.setLineDash([]);
@@ -317,8 +317,8 @@ function drawCore(t) {
   };
   const drawSat = (sa, front) => {
     const [x, y] = satPos(sa);
-    ctx.fillStyle = "rgba(190,228,255," + al((front ? 0.95 : 0.28) * glow) + ")";
-    ctx.shadowColor = "rgba(140,200,255,0.9)"; ctx.shadowBlur = front ? 9 : 0;
+    ctx.fillStyle = "rgba(110,145,195," + al((front ? 0.95 : 0.28) * glow) + ")";
+    ctx.shadowColor = "rgba(100,140,195,0.7)"; ctx.shadowBlur = front ? 9 : 0;
     ctx.beginPath(); ctx.arc(x, y, front ? 2.4 : 1.6, 0, 7); ctx.fill();
     ctx.shadowBlur = 0;
   };
@@ -343,8 +343,8 @@ function drawCore(t) {
     ctx.lineTo(Math.cos(a) * dialR, Math.sin(a) * dialR);
     ctx.stroke();
   }
-  ctx.fillStyle = "rgba(255,150,60," + al(0.55 * glow) + ")";
-  ctx.shadowColor = "rgba(255,150,60,0.8)"; ctx.shadowBlur = 6;
+  ctx.fillStyle = "rgba(105,120,145," + al(0.55 * glow) + ")";
+  ctx.shadowColor = "rgba(105,120,145,0.8)"; ctx.shadowBlur = 6;
   for (let k = 0; k < 4; k++) {
     const a = Math.PI / 4 + k * Math.PI / 2;
     ctx.save();
@@ -381,8 +381,8 @@ function drawCore(t) {
     const depth = 0.25 + 0.75 * z3;
     const a = d.land ? (0.68 + 0.32 * tw) * depth * glow : 0.16 * tw * depth * glow;
     ctx.fillStyle = d.land
-      ? (d.blue ? "rgba(150,215,255," + al(a) + ")" : "rgba(255,178,90," + al(a) + ")")
-      : "rgba(120,150,190," + al(a) + ")";
+      ? (d.blue ? "rgba(100,140,195," + al(a) + ")" : "rgba(75,90,115," + al(a) + ")")
+      : "rgba(165,180,200," + al(a) + ")";
     const sz = d.s * (0.45 + 0.55 * z3);
     ctx.beginPath();
     ctx.arc(cx + x3 * sR * 0.94, cy - y3 * sR * 0.94, sz, 0, 7);
@@ -398,9 +398,9 @@ function drawCore(t) {
     if (z3 <= 0.15) continue;
     const tw = 0.6 + 0.4 * Math.sin(t * 3.2 + d.ph * 2);
     ctx.fillStyle = d.blue
-      ? "rgba(170,222,255," + al(0.9 * tw * glow) + ")"
-      : "rgba(255,205,130," + al(0.9 * tw * glow) + ")";
-    ctx.shadowColor = d.blue ? "rgba(140,200,255,0.9)" : "rgba(255,170,80,0.9)";
+      ? "rgba(85,125,185," + al(0.9 * tw * glow) + ")"
+      : "rgba(70,85,110," + al(0.9 * tw * glow) + ")";
+    ctx.shadowColor = d.blue ? "rgba(100,140,195,0.7)" : "rgba(140,155,180,0.9)";
     ctx.shadowBlur = 7;
     ctx.beginPath(); ctx.arc(cx + x3 * sR * 0.94, cy - y3 * sR * 0.94, 2.1, 0, 7); ctx.fill();
   }
@@ -409,13 +409,13 @@ function drawCore(t) {
   // 8. Fresnel rim light, brightest on the left limb
   if (ctx.createConicGradient) {
     const cg = ctx.createConicGradient(Math.PI, cx, cy);
-    cg.addColorStop(0, "rgba(255,170,80," + al(0.95 * glow) + ")");
+    cg.addColorStop(0, "rgba(140,155,180," + al(0.95 * glow) + ")");
     cg.addColorStop(0.25, "rgba(255,140,50," + al(0.30 * glow) + ")");
     cg.addColorStop(0.5, "rgba(140,200,255," + al(0.45 * glow) + ")");
     cg.addColorStop(0.75, "rgba(120,170,230," + al(0.12 * glow) + ")");
-    cg.addColorStop(1, "rgba(255,170,80," + al(0.95 * glow) + ")");
+    cg.addColorStop(1, "rgba(140,155,180," + al(0.95 * glow) + ")");
     ctx.strokeStyle = cg; ctx.lineWidth = 2.8;
-    ctx.shadowColor = "rgba(255,150,60,0.85)"; ctx.shadowBlur = 12 * glow;
+    ctx.shadowColor = "rgba(105,120,145,0.85)"; ctx.shadowBlur = 12 * glow;
     ctx.beginPath(); ctx.arc(cx, cy, sR - 1, 0, 7); ctx.stroke();
     ctx.shadowBlur = 0;
   }
@@ -435,10 +435,10 @@ function drawCore(t) {
   if (ctx.createConicGradient) {
     const swA = (t * 0.9) % (Math.PI * 2);
     const sw = ctx.createConicGradient(swA, cx, cy);
-    sw.addColorStop(0, "rgba(150,215,255," + al(0.22 * glow) + ")");
-    sw.addColorStop(0.10, "rgba(150,215,255," + al(0.05 * glow) + ")");
-    sw.addColorStop(0.25, "rgba(150,215,255,0)");
-    sw.addColorStop(1, "rgba(150,215,255,0)");
+    sw.addColorStop(0, "rgba(100,140,195," + al(0.22 * glow) + ")");
+    sw.addColorStop(0.10, "rgba(100,140,195," + al(0.05 * glow) + ")");
+    sw.addColorStop(0.25, "rgba(100,140,195,0)");
+    sw.addColorStop(1, "rgba(100,140,195,0)");
     ctx.fillStyle = sw;
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, sR, 0, 7); ctx.fill();
   }
@@ -455,8 +455,8 @@ function drawCore(t) {
   // 9c. Soft floor reflection beneath the globe.
   ctx.save(); ctx.translate(cx, cy + sR * 1.04); ctx.scale(1, 0.26);
   const rfl = ctx.createLinearGradient(0, -sR * 0.2, 0, sR * 1.1);
-  rfl.addColorStop(0, "rgba(255,150,70," + al(0.12 * glow) + ")");
-  rfl.addColorStop(1, "rgba(255,150,70,0)");
+  rfl.addColorStop(0, "rgba(140,155,180," + al(0.12 * glow) + ")");
+  rfl.addColorStop(1, "rgba(140,155,180,0)");
   ctx.fillStyle = rfl;
   ctx.beginPath(); ctx.arc(0, 0, sR * 0.85, 0, 7); ctx.fill();
   ctx.restore();
@@ -465,7 +465,7 @@ function drawCore(t) {
   if (coreState === "speaking") {
     for (let i = 0; i < 2; i++) {
       const ph = (t * 0.9 + i * 0.5) % 1;
-      ctx.strokeStyle = "rgba(255,150,60," + al((1 - ph) * 0.5 * glow) + ")";
+      ctx.strokeStyle = "rgba(105,120,145," + al((1 - ph) * 0.5 * glow) + ")";
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(cx, cy, sR + ph * (R * 0.40 + p.pulse), 0, 7); ctx.stroke();
     }

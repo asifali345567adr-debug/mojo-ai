@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#050507">
+<meta name="theme-color" content="#f7f7f8">
 <meta name="description" content="Mojo — a private, server-backed AI command center.">
 <title>Mojo — Private AI Command Center</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -15,7 +17,7 @@
   <!-- ============ SIDEBAR ============ -->
   <aside id="sidebar" aria-label="Conversations">
     <div class="side-head">
-      <div class="side-brand"><span class="brand-orb" aria-hidden="true"></span><span class="side-brand-name">MOJO</span></div>
+      <div class="side-brand"><img class="brand-logo" src="logo-badge.png" alt="Mojo logo" width="30" height="30"><span class="side-brand-name">Mojo</span></div>
       <button id="newChatBtn" class="btn-primary" type="button">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         New chat
@@ -36,7 +38,7 @@
       <button id="menuBtn" class="icon-btn only-mobile" type="button" aria-label="Open conversations">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <div id="brand"><span class="brand-orb" aria-hidden="true"></span><span class="brand-name">MOJO</span></div>
+      <div id="brand"><img class="brand-logo" src="logo-badge.png" alt="Mojo logo" width="30" height="30"><span class="brand-name">Mojo</span></div>
       <div class="topbar-spacer"></div>
       <div id="statusPill" class="checking" role="status">
         <span id="statusDot" aria-hidden="true"></span><span id="statusText">Checking…</span>
@@ -63,6 +65,7 @@
 
     <section id="chatScroll" aria-live="polite">
       <div id="emptyState">
+        <img class="empty-logo" src="logo-badge.png" alt="Mojo logo" width="72" height="72">
         <h1>How can I help?</h1>
         <p class="empty-sub">Mojo is your private AI — running on your own server, answering only you.</p>
         <div class="sugg-grid">
