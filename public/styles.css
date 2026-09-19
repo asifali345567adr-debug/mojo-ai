@@ -229,6 +229,8 @@ body {
 }
 .msg .bubble pre.code code { font-family: var(--mono); color: #cfe3f5; }
 .msg-img { max-width: 280px; border-radius: 12px; border: 1px solid var(--border-strong); display: block; margin-bottom: 8px; }
+/* Inline images from markdown ![alt](url) in chat replies */
+.msg-md-img { max-width: 100%; border-radius: 12px; border: 1px solid var(--border-strong); display: block; margin: 8px 0; }
 
 /* Image-generation "painting" placeholder (ChatGPT-style shimmer) */
 .imggen-art {
