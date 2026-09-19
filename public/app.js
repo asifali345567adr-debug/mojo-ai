@@ -173,6 +173,40 @@ function renderTools() {
     });
     list.appendChild(b);
   }
+  renderSheetTools();
+}
+/* Mobile tools bottom sheet: same attached tools, one tap to command. */
+function renderSheetTools() {
+  const list = $("#sheetToolList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!tools.length) {
+    const d = document.createElement("div");
+    d.className = "tools-empty";
+    d.textContent = "No tools attached yet.";
+    list.appendChild(d);
+    return;
+  }
+  for (const t of tools) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tool-item";
+    const ic = document.createElement("span");
+    ic.className = "tool-icon";
+    ic.textContent = toolInitial(t);
+    const nm = document.createElement("span");
+    nm.className = "tool-name";
+    nm.textContent = t.name;
+    const x = document.createElement("span");
+    x.className = "tool-detach";
+    x.textContent = "×";
+    x.setAttribute("role", "button");
+    x.setAttribute("aria-label", "Detach " + t.name);
+    x.addEventListener("click", e => { e.stopPropagation(); detachTool(t.id); });
+    b.appendChild(ic); b.appendChild(nm); b.appendChild(x);
+    b.addEventListener("click", () => { prefillTool(t); closeSheets(); });
+    list.appendChild(b);
+  }
 }
 /* Persistent rail at the left edge (desktop and mobile, sidebar open or closed):
    the attached tool icons stay one tap away, like the library. */
@@ -831,6 +865,15 @@ function syncBrainKeyUI() {
   if (dot) dot.classList.toggle("on", has);
   const rdot = $("#railBrainDot");
   if (rdot) rdot.classList.toggle("on", has);
+  /* Mobile brain sheet mirrors the same state. */
+  const shInput = $("#sheetBrainKeyInput");
+  if (shInput) {
+    shInput.value = "";
+    shInput.placeholder = has ? "•••••••• — a key is saved on this device" : "sk-or-… (OpenRouter key)";
+  }
+  setBrainKeyNote(has
+    ? "A personal key is saved on this device — Mojo's brain uses it here."
+    : "Saved only in this browser. When set, your key powers Mojo's brain on this device.", "#sheetBrainNote");
 }
 async function saveBrainKeyFrom(inputSel, noteSel) {
   const input = $(inputSel);
@@ -1703,6 +1746,11 @@ function autoresize() {
   const ta = $("#input");
   ta.style.height = "auto";
   ta.style.height = Math.min(160, ta.scrollHeight) + "px";
+  /* Mobile app-style composer: mic when empty, send arrow when typing. */
+  const hasText = ta.value.trim().length > 0;
+  const sb = $("#sendBtn"), mb = $("#micBtn");
+  if (sb) sb.classList.toggle("show", hasText);
+  if (mb) mb.classList.toggle("hide", hasText);
 }
 function submitFromComposer() {
   if (sending) { stopCurrentSend(); return; } // send button doubles as stop while streaming
@@ -1798,13 +1846,82 @@ function applySettingsUI() {
   if (sel) sel.value = settings.voiceLang || "ur-PK";
 }
 
+/* ================= Mobile app-style UI (Muse-app look) ================= */
+function syncMobileChrome() {
+  document.body.classList.toggle("m-app", isMobileLayout());
+}
+function openSheet(sel) {
+  closeSheets();
+  const scrim = $("#sheetScrim");
+  const el = $(sel);
+  if (scrim) scrim.classList.add("open");
+  if (el) requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("open")));
+}
+function closeSheets() {
+  const scrim = $("#sheetScrim");
+  if (scrim) scrim.classList.remove("open");
+  $$(".sheet.open").forEach(el => el.classList.remove("open"));
+}
+function setActiveTab(name) {
+  $$(".mtab").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+}
+async function inviteApp() {
+  const url = "https://mojo-ai.vercel.app";
+  if (navigator.share) {
+    try { await navigator.share({ title: "Mojo AI", text: "Try Mojo — my private AI assistant", url }); return; }
+    catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  try { await navigator.clipboard.writeText(url); toast("App link copied — share it anywhere."); }
+  catch (e) { toast(url); }
+}
+function onTabClick(name) {
+  setActiveTab(name);
+  if (name === "chat") { closeSheets(); startNewChat(); }
+  else if (name === "notes") { const t = $("#sheetNotes"); if (t) t.value = getNotes(); openSheet("#notesSheet"); }
+  else if (name === "research") { closeSheets(); openResearch(); }
+  else if (name === "brain") { syncBrainKeyUI(); openSheet("#brainSheet"); }
+  else if (name === "tools") { renderSheetTools(); openSheet("#toolsSheet"); }
+}
+function initMobileUI() {
+  syncMobileChrome();
+  addEventListener("resize", syncMobileChrome);
+  $$(".mtab").forEach(b => b.addEventListener("click", () => onTabClick(b.dataset.tab)));
+  $$(".sheet-close").forEach(b => b.addEventListener("click", closeSheets));
+  const scrim = $("#sheetScrim");
+  if (scrim) scrim.addEventListener("click", closeSheets);
+  const inv = $("#inviteBtn");
+  if (inv) inv.addEventListener("click", inviteApp);
+  const plus = $("#plusBtn");
+  if (plus) plus.addEventListener("click", () => { setActiveTab("chat"); openSheet("#attachSheet"); });
+  const ap = $("#sheetAttachPhoto");
+  if (ap) ap.addEventListener("click", () => { closeSheets(); setActiveTab("chat"); $("#fileInput").click(); });
+  const gi = $("#sheetGenImage");
+  if (gi) gi.addEventListener("click", () => { closeSheets(); setActiveTab("chat"); generateImage(); });
+  const ns = $("#sheetNotesSave");
+  if (ns) ns.addEventListener("click", () => {
+    const src = $("#sheetNotes"), dst = $("#notesInput");
+    if (dst && src) dst.value = src.value;
+    saveNotes(); closeSheets();
+  });
+  const sb = $("#sheetSaveBrainKey");
+  if (sb) sb.addEventListener("click", () => saveBrainKeyFrom("#sheetBrainKeyInput", "#sheetBrainNote"));
+  const rb = $("#sheetRemoveBrainKey");
+  if (rb) rb.addEventListener("click", removeBrainKey);
+  const sbi = $("#sheetBrainKeyInput");
+  if (sbi) sbi.addEventListener("keydown", e => { if (e.key === "Enter") saveBrainKeyFrom("#sheetBrainKeyInput", "#sheetBrainNote"); });
+  const at = $("#sheetAttachTool");
+  if (at) at.addEventListener("click", () => { closeSheets(); openToolModal(); });
+  const ss = $("#sideSettingsBtn");
+  if (ss) ss.addEventListener("click", () => { closeSidebar(); renderStatus(); syncBrainKeyUI(); openDrawer(); });
+}
+
 /* ================= Init ================= */
 function init() {
   loadSettings();
   loadTools();
   loadConvs();
   initAmbient();
-  initCore();
+  if (!isMobileLayout()) initCore(); /* mobile app-style UI hides the core stage */
   loadVoices();
   if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = loadVoices;
 
@@ -1931,10 +2048,13 @@ function init() {
     toast("All conversations deleted.");
   });
 
-  // Escape closes drawer / sidebar / tool modal
+  // Escape closes drawer / sidebar / tool modal / sheets
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { closeToolModal(); closeResearch(); closeResearchKeyModal(); closeDrawer(); closeSidebar(); }
+    if (e.key === "Escape") { closeToolModal(); closeResearch(); closeResearchKeyModal(); closeDrawer(); closeSidebar(); closeSheets(); }
   });
+
+  // Mobile app-style UI (bottom tabs, sheets, invite, + menu)
+  initMobileUI();
 }
 
 document.addEventListener("DOMContentLoaded", init);
