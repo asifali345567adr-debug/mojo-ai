@@ -299,14 +299,14 @@ function drawCore(t) {
     px[i] = m.bx + Math.sin(t * 0.50 * p.drift + m.phx) * m.ax;
     py[i] = m.by + Math.cos(t * 0.42 * p.drift + m.phy) * m.ay;
   }
-  ctx.lineWidth = 0.8;
-  ctx.strokeStyle = "rgba(25,30,40," + al(0.30 * glow) + ")";
+  ctx.lineWidth = 1.0;
+  ctx.strokeStyle = "rgba(12,14,20," + al(0.72 * glow) + ")";
   ctx.beginPath();
   for (const e of meshEdges) { ctx.moveTo(px[e[0]], py[e[0]]); ctx.lineTo(px[e[1]], py[e[1]]); }
   ctx.stroke();
 
   // 4. Fade the lattice into the white background at the edges.
-  const fade = ctx.createRadialGradient(cx, cy, R * 0.26, cx, cy, R * 0.60);
+  const fade = ctx.createRadialGradient(cx, cy, R * 0.30, cx, cy, R * 0.68);
   fade.addColorStop(0, "rgba(255,255,255,0)");
   fade.addColorStop(1, "rgba(255,255,255,1)");
   ctx.fillStyle = fade; ctx.fillRect(0, 0, coreW, coreH);
