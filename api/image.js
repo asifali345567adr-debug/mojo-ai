@@ -1,48 +1,172 @@
-// Free image generation for Mojo AI, powered by Pollinations (no API key needed).
-// The prompt is sent to Pollinations; the image streams back through this
-// function and is never stored on the server.
+// Free image generation for Mojo AI.
+//
+// Two providers, picked automatically:
+//   1. Hugging Face Inference (FLUX.1-schnell) when the HF_TOKEN env var is set —
+//      no watermark, better quality. The token is free; the user adds it in Vercel.
+//   2. Pollinations anonymous endpoint otherwise — free with no key, but every
+//      image carries the Pollinations watermark (their rule: nologo needs an
+//      account, and our nologo=true is still sent on the off chance it helps).
+//
+// Images stream back through this function and are never stored on the server.
 
 import { clientIp, rateLimited, noStore } from "./_lib.js";
 
-const POLLINATIONS_BASE = "https://image.pollinations.ai/prompt";
 const MAX_PROMPT_CHARS = 2000;
 const IMAGE_TIMEOUT_MS = 55_000;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
 const MAX_ATTEMPTS = 3;
+
+const HF_URL =
+  "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell";
+const POLLINATIONS_BASE = "https://image.pollinations.ai/prompt";
 
 function fail(res, status, error, detail) {
   noStore(res);
   return res.status(status).json({ error, detail });
 }
 
-// Pollinations is a free service and hiccups often (a 500 here, a dropped
-// connection there). Retry transient failures with backoff before ever
-// bothering the user — the same approach the chat endpoint uses for its
-// provider. Client errors (other 4xx) are final and are never retried.
-async function fetchWithRetries(url, signal) {
-  let lastStatus = 0;
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal && signal.aborted) return resolve();
+    const t = setTimeout(() => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(t);
+      resolve();
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function abortError() {
+  const e = new Error("aborted");
+  e.name = "AbortError";
+  return e;
+}
+
+async function cancelBody(resp) {
+  try {
+    if (resp.body && resp.body.cancel) await resp.body.cancel();
+  } catch (e) {}
+}
+
+// Hugging Face path: POST the prompt, get raw image bytes back.
+// 503 usually means the model is cold-loading — honor its estimated_time.
+async function generateViaHF(prompt, token, signal) {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    if (signal.aborted) {
-      const e = new Error("aborted");
-      e.name = "AbortError";
-      throw e;
+    if (signal.aborted) throw abortError();
+    let resp;
+    try {
+      resp = await fetch(HF_URL, {
+        method: "POST",
+        signal,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "image/*",
+        },
+        body: JSON.stringify({ inputs: prompt }),
+      });
+    } catch (e) {
+      if (e && e.name === "AbortError") throw e;
+      if (attempt === MAX_ATTEMPTS) return { ok: false };
+      await sleep(attempt * 1000, signal);
+      continue;
     }
+    if (resp.ok) return { ok: true, upstream: resp };
+    const status = resp.status;
+    let waitMs = attempt * 1000;
+    if (status === 503) {
+      try {
+        const j = await resp.json();
+        if (j && typeof j.estimated_time === "number") {
+          waitMs = Math.min(Math.max(j.estimated_time * 1000, 1000), 20000);
+        }
+      } catch (e) {}
+    } else {
+      await cancelBody(resp);
+    }
+    const retryable = status >= 500 || status === 429;
+    if (!retryable || attempt === MAX_ATTEMPTS) return { ok: false, status };
+    await sleep(waitMs, signal);
+  }
+  return { ok: false };
+}
+
+// Pollinations path: plain GET; retries transient 5xx/429 with backoff.
+async function generateViaPollinations(prompt, signal) {
+  const url =
+    `${POLLINATIONS_BASE}/${encodeURIComponent(prompt)}` +
+    "?width=1024&height=1024&model=flux&nologo=true&private=true&enhance=true";
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (signal.aborted) throw abortError();
     try {
       const upstream = await fetch(url, { signal });
       if (upstream.ok) return { ok: true, upstream };
-      lastStatus = upstream.status;
-      try {
-        if (upstream.body && upstream.body.cancel) await upstream.body.cancel();
-      } catch (e) {}
-      const retryable = upstream.status >= 500 || upstream.status === 429;
-      if (!retryable || attempt === MAX_ATTEMPTS) break;
+      const status = upstream.status;
+      await cancelBody(upstream);
+      const retryable = status >= 500 || status === 429;
+      if (!retryable || attempt === MAX_ATTEMPTS) return { ok: false, status };
     } catch (e) {
       if (e && e.name === "AbortError") throw e;
-      if (attempt === MAX_ATTEMPTS) break;
+      if (attempt === MAX_ATTEMPTS) return { ok: false };
     }
-    await new Promise((r) => setTimeout(r, attempt * 1000));
+    await sleep(attempt * 1000, signal);
   }
-  return { ok: false, status: lastStatus };
+  return { ok: false };
+}
+
+// Validate and stream the image bytes to the client with a hard byte cap.
+async function pipeImage(res, upstream) {
+  const contentType = upstream.headers.get("content-type") || "";
+  if (!contentType.startsWith("image/")) {
+    await cancelBody(upstream);
+    return fail(
+      res,
+      502,
+      "IMAGE_ERROR",
+      "The image service returned an unexpected response. Please try again."
+    );
+  }
+  const reader = upstream.body.getReader();
+  const chunks = [];
+  let total = 0;
+  let tooBig = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_IMAGE_BYTES) {
+        tooBig = true;
+        break;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch (e) {}
+  }
+  if (tooBig) {
+    return fail(
+      res,
+      502,
+      "IMAGE_ERROR",
+      "The generated image was too large. Please try a simpler description."
+    );
+  }
+  if (total === 0) {
+    return fail(res, 502, "IMAGE_ERROR", "The image service returned nothing. Please try again.");
+  }
+  res.writeHead(200, {
+    "Content-Type": contentType.split(";")[0],
+    "Content-Length": String(total),
+    "Cache-Control": "no-store",
+  });
+  return res.end(Buffer.concat(chunks));
 }
 
 export default async function handler(req, res) {
@@ -52,8 +176,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "method_not_allowed" });
   }
 
-  // Image generation shares the per-IP rate limiter with chat, so one bad
-  // actor can't burn the pipe on images alone.
   const rl = rateLimited(clientIp(req));
   if (rl.limited) {
     if (rl.retryAfter > 0) res.setHeader("Retry-After", String(Math.min(rl.retryAfter, 60)));
@@ -74,14 +196,31 @@ export default async function handler(req, res) {
     );
   }
 
-  const url =
-    `${POLLINATIONS_BASE}/${encodeURIComponent(prompt)}` +
-    "?width=1024&height=1024&nologo=true&private=true";
-
+  const hfToken = process.env.HF_TOKEN;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), IMAGE_TIMEOUT_MS);
   try {
-    const out = await fetchWithRetries(url, ctrl.signal);
+    // Prefer Hugging Face (no watermark) when a token is configured.
+    if (hfToken) {
+      const hf = await generateViaHF(prompt, hfToken, ctrl.signal);
+      if (hf.ok) {
+        clearTimeout(timer);
+        return pipeImage(res, hf.upstream);
+      }
+      // A bad/revoked token is a config problem the user must fix — say so.
+      if (hf.status === 401 || hf.status === 403) {
+        clearTimeout(timer);
+        return fail(
+          res,
+          502,
+          "IMAGE_KEY_ERROR",
+          "The image service key isn't working. Please check it and try again."
+        );
+      }
+      // Any other HF failure: fall through to Pollinations rather than erroring.
+    }
+    const out = await generateViaPollinations(prompt, ctrl.signal);
+    clearTimeout(timer);
     if (!out.ok) {
       return fail(
         res,
@@ -90,58 +229,7 @@ export default async function handler(req, res) {
         "The image service is temporarily down. Please try again in a little while."
       );
     }
-    const upstream = out.upstream;
-    const contentType = upstream.headers.get("content-type") || "";
-    if (!contentType.startsWith("image/")) {
-      try {
-        if (upstream.body && upstream.body.cancel) await upstream.body.cancel();
-      } catch (e) {}
-      return fail(
-        res,
-        502,
-        "IMAGE_ERROR",
-        "The image service returned an unexpected response. Please try again."
-      );
-    }
-    // Read with a hard byte cap so a runaway response can never blow memory.
-    const reader = upstream.body.getReader();
-    const chunks = [];
-    let total = 0;
-    let tooBig = false;
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        total += value.byteLength;
-        if (total > MAX_IMAGE_BYTES) {
-          tooBig = true;
-          break;
-        }
-        chunks.push(value);
-      }
-    } finally {
-      try {
-        await reader.cancel();
-      } catch (e) {}
-    }
-    clearTimeout(timer);
-    if (tooBig) {
-      return fail(
-        res,
-        502,
-        "IMAGE_ERROR",
-        "The generated image was too large. Please try a simpler description."
-      );
-    }
-    if (total === 0) {
-      return fail(res, 502, "IMAGE_ERROR", "The image service returned nothing. Please try again.");
-    }
-    res.writeHead(200, {
-      "Content-Type": contentType.split(";")[0],
-      "Content-Length": String(total),
-      "Cache-Control": "no-store",
-    });
-    return res.end(Buffer.concat(chunks));
+    return pipeImage(res, out.upstream);
   } catch (e) {
     clearTimeout(timer);
     const timedOut = e && e.name === "AbortError";
