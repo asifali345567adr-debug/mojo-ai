@@ -81,6 +81,80 @@ function loadSettings() {
   } catch (e) {}
 }
 
+/* ================= Plugins =================
+   Free, keyless plugins. Each tile in the sidebar toggles one capability;
+   the toggle shows/hides that capability's button in the composer. */
+const LS_PLUGINS = "mojo.plugins.v1";
+const ICON_PLUGIN_IMG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+const ICON_PLUGIN_VOICE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9.4 9.4 0 0 1 0 13"/></svg>';
+const ICON_PLUGIN_SEARCH = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>';
+const PLUGINS = [
+  { id: "image", name: "Image Studio", desc: "Create pictures from words", icon: ICON_PLUGIN_IMG },
+  { id: "voice", name: "Voice", desc: "Talk & hear replies aloud", icon: ICON_PLUGIN_VOICE },
+  { id: "search", name: "Web Search", desc: "Look things up on the web", icon: ICON_PLUGIN_SEARCH },
+];
+let plugins = { image: true, voice: true, search: true };
+function loadPlugins() {
+  try {
+    const raw = localStorage.getItem(LS_PLUGINS);
+    if (raw) plugins = Object.assign({ image: true, voice: true, search: true }, JSON.parse(raw));
+  } catch (e) {}
+}
+function savePlugins() { try { localStorage.setItem(LS_PLUGINS, JSON.stringify(plugins)); } catch (e) {} }
+function pluginOn(id) { return !!plugins[id]; }
+function renderPlugins() {
+  const list = $("#pluginList");
+  if (!list) return;
+  list.innerHTML = "";
+  for (const p of PLUGINS) {
+    const row = document.createElement("div");
+    row.className = "plugin-item" + (pluginOn(p.id) ? " on" : "");
+    const icon = document.createElement("span");
+    icon.className = "plugin-icon"; icon.innerHTML = p.icon;
+    const meta = document.createElement("span");
+    meta.className = "plugin-meta";
+    const nm = document.createElement("span");
+    nm.className = "plugin-name"; nm.textContent = p.name + " ";
+    const badge = document.createElement("em");
+    badge.className = "free-badge"; badge.textContent = "Free";
+    nm.appendChild(badge);
+    const ds = document.createElement("span");
+    ds.className = "plugin-desc"; ds.textContent = p.desc;
+    meta.appendChild(nm); meta.appendChild(ds);
+    const lab = document.createElement("label");
+    lab.className = "ptoggle";
+    const input = document.createElement("input");
+    input.type = "checkbox"; input.checked = pluginOn(p.id);
+    input.setAttribute("aria-label", p.name + " plugin");
+    const sw = document.createElement("span");
+    sw.className = "switch"; sw.setAttribute("aria-hidden", "true");
+    lab.appendChild(input); lab.appendChild(sw);
+    input.addEventListener("change", () => {
+      plugins[p.id] = input.checked;
+      savePlugins();
+      applyPluginsUI();
+      renderPlugins();
+      toast(p.name + (input.checked ? " enabled, sir." : " disabled."));
+    });
+    row.appendChild(icon); row.appendChild(meta); row.appendChild(lab);
+    list.appendChild(row);
+  }
+}
+/* Show/hide each capability's composer button from its plugin toggle.
+   Turning Voice off also stops any speech and closes the mic. */
+function applyPluginsUI() {
+  const img = $("#imageBtn"), mic = $("#micBtn"), sbtn = $("#searchBtn");
+  if (img) img.style.display = pluginOn("image") ? "" : "none";
+  if (mic) mic.style.display = pluginOn("voice") ? "" : "none";
+  if (sbtn) sbtn.style.display = pluginOn("search") ? "" : "none";
+  const panel = $("#searchPanel");
+  if (panel && !pluginOn("search")) panel.hidden = true;
+  if (!pluginOn("voice")) {
+    stopSpeak();
+    if (listening) toggleListening();
+  }
+}
+
 /* ================= Conversations ================= */
 function getActive() { return conversations.find(c => c.id === activeId) || null; }
 function makeTitle(text) {
@@ -567,6 +641,7 @@ function renderMessages() {
   for (let i = 0; i < c.messages.length; i++) {
     const m = c.messages[i];
     if (m.role === "error") appendErrorBubble(m.text, false);
+    else if (m.kind === "search") appendSearchCard(m, false);
     else if (m.kind === "genimg" && m.imgId && sessionImages.has(m.imgId)) {
       const e = sessionImages.get(m.imgId);
       appendGeneratedImage(m.imgId, e.url, e.type, false);
@@ -921,6 +996,7 @@ function handleChatError(code, detail, status) {
 
 /* ================= Voice input ================= */
 function toggleListening() {
+  if (!pluginOn("voice")) { toast("Voice plugin is disabled, sir."); return; }
   if (!settings.voiceInput) { toast("Voice input is turned off in Settings."); return; }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { toast("Voice input isn't supported in this browser. Try Chrome or Edge."); return; }
@@ -969,7 +1045,7 @@ function ttsVoiceFor() {
   return inLang.find(v => maleHints.test(v.name || "")) || inLang[0] || enMale || enAny || voices[0] || null;
 }
 function ttsEnqueue(text) {
-  if (!settings.tts || !("speechSynthesis" in window)) return;
+  if (!settings.tts || !pluginOn("voice") || !("speechSynthesis" in window)) return;
   const clean = String(text || "").replace(/`+/g, " ").replace(/\s+/g, " ").trim().slice(0, 500);
   if (clean.length < 2) return;
   try {
@@ -984,7 +1060,7 @@ function ttsEnqueue(text) {
 }
 /* Full-reply fallback for the non-streaming path. */
 function speak(text) {
-  if (!settings.tts) return;
+  if (!settings.tts || !pluginOn("voice")) return;
   if (!("speechSynthesis" in window)) return;
   try {
     speechSynthesis.cancel();
@@ -1039,7 +1115,7 @@ function splitSpokenSentences(text) {
 }
 function speakStreamStart() { ttsSpokenUpTo = 0; ttsStreamText = ""; }
 function speakStreamChunk(fullText) {
-  if (!settings.tts || !("speechSynthesis" in window)) return;
+  if (!settings.tts || !pluginOn("voice") || !("speechSynthesis" in window)) return;
   ttsStreamText = String(fullText || "");
   // Only examine the part of the stream we have not spoken yet.
   const fresh = ttsStreamText.slice(ttsSpokenUpTo);
@@ -1283,6 +1359,110 @@ function handleImageError(code, detail, status) {
   appendErrorBubble(msg);
 }
 /* ================= Composer ================= */
+/* ================= Web Search plugin =================
+   Free, keyless search via our own /api/search (Wikipedia + DuckDuckGo).
+   Results land in the chat as a tappable card and are saved with the
+   conversation like any other message. */
+function toggleSearchPanel(force) {
+  if (!pluginOn("search")) return;
+  const p = $("#searchPanel");
+  const show = force != null ? !!force : p.hidden;
+  p.hidden = !show;
+  if (show) { const q = $("#searchQuery"); if (q) q.focus(); }
+}
+function appendSearchPending(q) {
+  const wrap = $("#messages");
+  const div = document.createElement("div");
+  div.className = "msg search";
+  const av = document.createElement("div");
+  av.className = "avatar"; av.textContent = "◎";
+  const bub = document.createElement("div");
+  bub.className = "bubble";
+  const card = document.createElement("div");
+  card.className = "search-card";
+  const h = document.createElement("div");
+  h.className = "search-q"; h.textContent = "Searching the web for “" + q + "”…";
+  const sp = document.createElement("span");
+  sp.className = "spinner"; sp.setAttribute("aria-hidden", "true");
+  h.prepend(sp);
+  card.appendChild(h);
+  bub.appendChild(card);
+  div.appendChild(av); div.appendChild(bub);
+  wrap.appendChild(div);
+  scrollBottom();
+  return div;
+}
+function appendSearchCard(m, animate) {
+  const wrap = $("#messages");
+  const div = document.createElement("div");
+  div.className = "msg search";
+  const av = document.createElement("div");
+  av.className = "avatar"; av.textContent = "◎";
+  const bub = document.createElement("div");
+  bub.className = "bubble";
+  const card = document.createElement("div");
+  card.className = "search-card";
+  const h = document.createElement("div");
+  h.className = "search-q";
+  h.textContent = "Web results for “" + (m.q || "") + "”";
+  card.appendChild(h);
+  const ol = document.createElement("ol");
+  ol.className = "search-results";
+  for (const r of (m.results || [])) {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.href = r.url; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = r.title || r.url;
+    const p = document.createElement("p");
+    p.textContent = r.snippet || "";
+    const src = document.createElement("span");
+    src.className = "sr-src"; src.textContent = r.source || "";
+    li.appendChild(a); li.appendChild(p); li.appendChild(src);
+    ol.appendChild(li);
+  }
+  card.appendChild(ol);
+  bub.appendChild(card);
+  div.appendChild(av); div.appendChild(bub);
+  wrap.appendChild(div);
+  if (animate) { div.classList.add("pop-in"); }
+  scrollBottom(true);
+  return div;
+}
+async function runWebSearch() {
+  if (!pluginOn("search")) return;
+  const input = $("#searchQuery");
+  const q = ((input && input.value) || "").trim().slice(0, 300);
+  if (!q) { toast("Type something to search, sir."); if (input) input.focus(); return; }
+  toggleSearchPanel(false);
+  const pending = appendSearchPending(q);
+  try {
+    const res = await fetch("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data && (data.detail || data.error)) || ("HTTP " + res.status));
+    const msg = { kind: "search", q, results: data.results || [], ts: Date.now() };
+    let c = getActive();
+    if (!c) { c = createConversation(); renderSidebar($("#searchInput").value); }
+    if (c.title === "New conversation") c.title = makeTitle("Web: " + q);
+    c.messages.push(msg);
+    c.updatedAt = Date.now();
+    saveConvs();
+    renderSidebar($("#searchInput").value);
+    pending.remove();
+    appendSearchCard(msg, true);
+    const empty = $("#emptyState");
+    if (empty) empty.style.display = "none";
+    $("#coreStage").classList.add("docked");
+    touchActive();
+  } catch (e) {
+    pending.remove();
+    appendErrorBubble("Search failed: " + (e.message || e), true);
+  }
+  if (input) input.value = "";
+}
 function autoresize() {
   const ta = $("#input");
   ta.style.height = "auto";
@@ -1385,6 +1565,7 @@ function applySettingsUI() {
 /* ================= Init ================= */
 function init() {
   loadSettings();
+  loadPlugins();
   loadConvs();
   initAmbient();
   initCore();
@@ -1393,6 +1574,8 @@ function init() {
 
   applySettingsUI();
   renderSidebar("");
+  renderPlugins();
+  applyPluginsUI();
   renderMessages();
   refreshHealth();
 
@@ -1414,6 +1597,15 @@ function init() {
   $("#imgRemove").addEventListener("click", () => { attachedImage = null; updateImgPreview(); });
   // Free image generation
   $("#imageBtn").addEventListener("click", generateImage);
+
+  // Web search plugin
+  $("#searchBtn").addEventListener("click", () => toggleSearchPanel());
+  $("#searchGo").addEventListener("click", runWebSearch);
+  $("#searchClose").addEventListener("click", () => toggleSearchPanel(false));
+  $("#searchQuery").addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); runWebSearch(); }
+    e.stopPropagation();
+  });
 
   // Voice
   $("#micBtn").addEventListener("click", toggleListening);
@@ -1470,9 +1662,9 @@ function init() {
     toast("All conversations deleted.");
   });
 
-  // Escape closes drawer / sidebar
+  // Escape closes drawer / sidebar / search panel
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { closeDrawer(); closeSidebar(); }
+    if (e.key === "Escape") { closeDrawer(); closeSidebar(); toggleSearchPanel(false); }
   });
 }
 
