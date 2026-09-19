@@ -43,7 +43,11 @@ function cleanBaseUrl(raw) {
   if (u.protocol !== "https:") return null;
   if (u.username || u.password) return null;
   if (hostBlocked(u.hostname)) return null;
-  return u.origin;
+  /* Keep the provider's path (e.g. /v1, /openai/v1, /v1beta/openai) — the
+     chat endpoint is appended below. */
+  let path = u.pathname.replace(/\/+$/, "");
+  if (!/\/chat\/completions$/i.test(path)) path += "/chat/completions";
+  return u.origin + path;
 }
 
 export default async function handler(req, res) {
@@ -85,7 +89,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "empty_message", detail: "Type a command for your tool first." });
   }
 
-  const url = baseUrl + "/chat/completions";
+  const url = baseUrl;
   const payload = JSON.stringify({
     model,
     messages: [{ role: "user", content: message }],
