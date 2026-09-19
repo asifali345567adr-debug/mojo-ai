@@ -176,72 +176,61 @@ function initAmbient() {
   (function loop(t) { draw(t); requestAnimationFrame(loop); })(0);
 }
 
-/* ================= Holographic core : dotted globe ================= */
+/* ================= Glint core : black lattice + starbursts on white ================= */
 const CORE_STATES = {
-  idle:      { spin: 0.15, glow: 0.70, pulse: 6,  blueMix: 0.35, label: "Idle" },
-  listening: { spin: 0.55, glow: 1.00, pulse: 12, blueMix: 0.85, label: "Listening" },
-  thinking:  { spin: 1.15, glow: 1.00, pulse: 8,  blueMix: 0.55, label: "Thinking" },
-  speaking:  { spin: 0.35, glow: 1.15, pulse: 15, blueMix: 0.40, label: "Speaking" }
+  idle:      { drift: 1.0, glow: 0.80, twinkle: 1.6, spark: 22, pulse: 6,  label: "Idle" },
+  listening: { drift: 1.7, glow: 1.00, twinkle: 2.6, spark: 30, pulse: 12, label: "Listening" },
+  thinking:  { drift: 2.6, glow: 1.00, twinkle: 3.8, spark: 38, pulse: 8,  label: "Thinking" },
+  speaking:  { drift: 1.4, glow: 0.95, twinkle: 2.2, spark: 26, pulse: 15, label: "Speaking" }
 };
-// Rough continent boxes [lonMin, lonMax, latMin, latMax], rasterized into globe dots.
-const LAND_BOXES = [
-  [-168,-140,60,71],[-140,-95,49,70],[-95,-55,46,62],[-125,-100,30,49],[-100,-67,25,47],
-  [-117,-87,16,32],[-92,-79,8,18],[-58,-20,60,84],
-  [-77,-50,-5,10],[-50,-35,-25,5],[-72,-60,-40,-5],[-73,-65,-55,-40],
-  [5,31,58,71],[-10,40,44,58],[-9,3,36,44],[-5,2,50,59],
-  [-10,35,18,35],[-18,-8,8,20],[-5,42,-5,18],[12,36,-35,-5],[43,51,-26,-12],
-  [40,180,52,75],[45,90,38,52],[35,60,15,38],[68,90,8,32],[90,122,22,45],
-  [95,108,8,22],[124,130,34,40],[129,146,31,46],[95,125,-10,6],[120,123,8,18],
-  [113,154,-39,-12],[166,179,-47,-34]
-];
-const globeDots = [];
-(function buildGlobeDots() {
-  const COLS = 72, ROWS = 36;
-  const landAt = (lon, lat) => {
-    for (const b of LAND_BOXES)
-      if (lon >= b[0] && lon <= b[1] && lat >= b[2] && lat <= b[3]) return true;
-    return false;
-  };
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const lon = -180 + (c + 0.5) * (360 / COLS);
-      const lat = 90 - (r + 0.5) * (180 / ROWS);
-      const land = landAt(lon, lat);
-      if (!land && Math.random() > 0.055) continue; // oceans: sparse dim dots
-      globeDots.push({
-        lon: lon + (Math.random() - 0.5) * 4.4,
-        lat: Math.max(-88, Math.min(88, lat + (Math.random() - 0.5) * 4.4)),
-        land: land,
-        hub: land && Math.random() < 0.05, // bright "city light" hubs
-        blue: Math.random() < 0.30,
-        ph: Math.random() * 6.283,
-        s: land ? 0.8 + Math.random() * 1.4 : 0.5 + Math.random() * 0.7
-      });
-    }
-  }
-})();
-// Faint drifting binary-digit backdrop, rendered once to an offscreen strip.
-let binStrip = null, binStripH = 220;
-function buildBinStrip() {
-  const w = Math.max(2, Math.floor(coreW)), h = binStripH;
-  const cv = document.createElement("canvas");
-  cv.width = w; cv.height = h;
-  const c = cv.getContext("2d");
-  c.font = "9px ui-monospace, Menlo, monospace";
-  c.textBaseline = "top";
-  const cols = Math.max(6, Math.floor(w / 26));
-  for (let i = 0; i < cols; i++) {
-    const x = (i + 0.5) * (w / cols) + (Math.random() - 0.5) * 8;
-    const blue = Math.random() < 0.4;
-    for (let y = 6; y < h; y += 13) {
-      if (Math.random() < 0.28) continue;
-      c.fillStyle = blue ? "rgba(120,180,230,0.10)" : "rgba(130,145,170,0.10)";
-      c.fillText(Math.random() < 0.5 ? "0" : "1", x, y);
-    }
-  }
-  binStrip = cv;
-}
 let coreCtx = null, coreW = 0, coreH = 0;
+// Crystalline lattice: jittered grid points + precomputed triangle edges.
+let meshPts = [], meshEdges = [], sparkles = [], dust = [];
+function buildMesh() {
+  meshPts = []; meshEdges = []; sparkles = []; dust = [];
+  const cell = 36;
+  const cols = Math.max(4, Math.ceil(coreW / cell));
+  const rows = Math.max(3, Math.ceil(coreH / cell));
+  const ox = (coreW - (cols - 1) * cell) / 2, oy = (coreH - (rows - 1) * cell) / 2;
+  const idx = (c, r) => r * cols + c;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    meshPts.push({
+      bx: ox + c * cell + (Math.random() - 0.5) * cell * 0.95,
+      by: oy + r * cell + (Math.random() - 0.5) * cell * 0.95,
+      phx: Math.random() * 6.283, phy: Math.random() * 6.283,
+      ax: 3 + Math.random() * 5, ay: 3 + Math.random() * 5
+    });
+  }
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (c < cols - 1) meshEdges.push([idx(c, r), idx(c + 1, r)]);
+    if (r < rows - 1) meshEdges.push([idx(c, r), idx(c, r + 1)]);
+    if (c < cols - 1 && r < rows - 1) {
+      if ((c + r) % 2) meshEdges.push([idx(c, r), idx(c + 1, r + 1)]);
+      else meshEdges.push([idx(c + 1, r), idx(c, r + 1)]);
+    }
+  }
+  // Sparkle nodes: spread out with minimum spacing.
+  const want = Math.round(meshPts.length * 0.30);
+  const cand = meshPts.map((_, i) => i);
+  for (let i = cand.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; const tmp = cand[i]; cand[i] = cand[j]; cand[j] = tmp; }
+  const taken = [];
+  for (const i of cand) {
+    if (taken.length >= want) break;
+    const q = meshPts[i];
+    let ok = true;
+    for (const sp of taken) {
+      const dx = meshPts[sp.i].bx - q.bx, dy = meshPts[sp.i].by - q.by;
+      if (dx * dx + dy * dy < cell * cell * 2.2) { ok = false; break; }
+    }
+    if (ok) taken.push({ i, ph: Math.random() * 6.283, rate: 0.7 + Math.random() * 1.1, s: 0.7 + Math.random() * 0.9 });
+  }
+  sparkles = taken;
+  for (let i = 0; i < 56; i++) {
+    dust.push({ x: Math.random() * coreW, y: Math.random() * coreH,
+      vx: (Math.random() - 0.5) * 7, vy: (Math.random() - 0.5) * 7,
+      s: 0.5 + Math.random() * 1.1, ph: Math.random() * 6.283 });
+  }
+}
 function sizeCore() {
   const cv = $("#core");
   const r = cv.parentElement.getBoundingClientRect();
@@ -249,225 +238,101 @@ function sizeCore() {
   coreW = Math.max(1, r.width); coreH = Math.max(1, r.height);
   cv.width = coreW * dpr; cv.height = coreH * dpr;
   coreCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  buildBinStrip();
+  buildMesh();
 }
 function setCoreState(s) {
   coreState = CORE_STATES[s] ? s : "idle";
   const el = $("#coreStateLabel");
   if (el) el.textContent = "MOJO";
 }
+// 4-pointed starburst glint: long thin rays with gradient falloff + bright core.
+function drawGlintSpark(ctx, x, y, s, alpha) {
+  const a = Math.min(1, Math.max(0, alpha)).toFixed(3);
+  const rays = [
+    [1, 0, 1], [-1, 0, 1], [0, 1, 0.92], [0, -1, 0.92],
+    [0.7071, 0.7071, 0.42], [-0.7071, 0.7071, 0.42],
+    [0.7071, -0.7071, 0.42], [-0.7071, -0.7071, 0.42]
+  ];
+  ctx.save(); ctx.translate(x, y);
+  for (const rd of rays) {
+    const L = s * 11 * rd[2], dx = rd[0], dy = rd[1];
+    const g = ctx.createLinearGradient(0, 0, dx * L, dy * L);
+    g.addColorStop(0, "rgba(15,17,23," + a + ")");
+    g.addColorStop(1, "rgba(15,17,23,0)");
+    ctx.strokeStyle = g; ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.moveTo(dx * -L * 0.22, dy * -L * 0.22); ctx.lineTo(dx * L, dy * L); ctx.stroke();
+  }
+  const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 2.6);
+  cg.addColorStop(0, "rgba(10,12,18," + Math.min(1, alpha * 1.5).toFixed(3) + ")");
+  cg.addColorStop(1, "rgba(10,12,18,0)");
+  ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(0, 0, s * 2.6, 0, 7); ctx.fill();
+  ctx.restore();
+}
 function drawCore(t) {
-  const ctx = coreCtx, p = CORE_STATES[coreState];
-  const al = (v) => Math.min(1, Math.max(0, v)).toFixed(3); // clamp alpha
+  const ctx = coreCtx, p = CORE_STATES[coreState] || CORE_STATES.idle;
+  const al = (v) => Math.min(1, Math.max(0, v)).toFixed(3);
   const cx = coreW / 2, cy = coreH / 2;
   const R = Math.min(coreW, coreH);
+  const glow = p.glow, fadeR = R * 0.54;
   ctx.clearRect(0, 0, coreW, coreH);
-  const sR = Math.max(24, R * 0.30); // globe radius
-  const breathe = 0.92 + 0.08 * Math.sin(t * 1.15);
-  const glow = p.glow * breathe;
 
-  // 1. Drifting binary-digit backdrop
-  if (binStrip) {
-    const off = (t * 10) % binStripH;
-    ctx.globalAlpha = 0.9;
-    for (let y = -off; y < coreH; y += binStripH) ctx.drawImage(binStrip, 0, y);
-    ctx.globalAlpha = 1;
+  // 1. Barely-there gray halo for depth.
+  const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.72);
+  halo.addColorStop(0, "rgba(20,24,32," + al(0.055 * glow) + ")");
+  halo.addColorStop(1, "rgba(20,24,32,0)");
+  ctx.fillStyle = halo; ctx.fillRect(0, 0, coreW, coreH);
+
+  // 2. Drifting micro dust.
+  for (const d of dust) {
+    const x = (((d.x + t * d.vx * p.drift) % coreW) + coreW) % coreW;
+    const y = (((d.y + t * d.vy * p.drift) % coreH) + coreH) % coreH;
+    const tw = 0.25 + 0.75 * Math.abs(Math.sin(t * 0.9 + d.ph));
+    ctx.fillStyle = "rgba(25,30,40," + al(0.20 * tw * glow) + ")";
+    ctx.beginPath(); ctx.arc(x, y, d.s, 0, 7); ctx.fill();
   }
 
-  // 2. Ambient aura
-  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, sR * 3.1);
-  g.addColorStop(0, "rgba(105,120,145," + al(0.34 * glow) + ")");
-  g.addColorStop(0.4, "rgba(130,145,170," + al(0.16 * glow) + ")");
-  g.addColorStop(0.7, "rgba(150,175,210," + al(0.14 * glow * (0.4 + p.blueMix)) + ")");
-  g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, coreW, coreH);
-  // Hot inner halo — the "lit from within" premium glow.
-  const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, sR * 1.9);
-  g2.addColorStop(0, "rgba(140,155,180," + al(0.20 * glow) + ")");
-  g2.addColorStop(1, "rgba(105,120,145,0)");
-  ctx.fillStyle = g2; ctx.fillRect(0, 0, coreW, coreH);
+  // 3. Crystalline lattice: drifting points joined into triangles.
+  const n = meshPts.length;
+  const px = new Float32Array(n), py = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const m = meshPts[i];
+    px[i] = m.bx + Math.sin(t * 0.50 * p.drift + m.phx) * m.ax;
+    py[i] = m.by + Math.cos(t * 0.42 * p.drift + m.phy) * m.ay;
+  }
+  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = "rgba(25,30,40," + al(0.30 * glow) + ")";
+  ctx.beginPath();
+  for (const e of meshEdges) { ctx.moveTo(px[e[0]], py[e[0]]); ctx.lineTo(px[e[1]], py[e[1]]); }
+  ctx.stroke();
 
-  // 3. Tilted orbit ring (back half first, front half after the globe)
-  const ringR = sR * 1.22;
-  const strokeRing = (a0, a1, style, width, blur) => {
-    ctx.save();
-    ctx.translate(cx, cy); ctx.rotate(-0.30); ctx.scale(1, 0.30);
-    ctx.strokeStyle = style; ctx.lineWidth = width;
-    ctx.shadowColor = style; ctx.shadowBlur = blur;
-    ctx.beginPath(); ctx.arc(0, 0, ringR, a0, a1); ctx.stroke();
-    ctx.restore();
-  };
-  strokeRing(Math.PI, Math.PI * 2, "rgba(120,155,200," + al(0.45 * glow) + ")", 1.6, 8);
+  // 4. Fade the lattice into the white background at the edges.
+  const fade = ctx.createRadialGradient(cx, cy, R * 0.26, cx, cy, R * 0.60);
+  fade.addColorStop(0, "rgba(255,255,255,0)");
+  fade.addColorStop(1, "rgba(255,255,255,1)");
+  ctx.fillStyle = fade; ctx.fillRect(0, 0, coreW, coreH);
 
-  // Thin dashed orbit ring, slow counter-rotation.
-  ctx.save(); ctx.translate(cx, cy); ctx.rotate(0.5); ctx.scale(1, 0.55);
-  ctx.strokeStyle = "rgba(140,155,180," + al(0.30 * glow) + ")";
-  ctx.lineWidth = 1; ctx.setLineDash([3, 7]); ctx.lineDashOffset = -t * 14;
-  ctx.beginPath(); ctx.arc(0, 0, sR * 1.38, 0, 7); ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
-
-  // Orbiting satellites (back half dimmed behind the globe; front half drawn later).
-  const satAngle = (k) => t * p.spin * (0.35 + k * 0.12) * 4 + k * 2.1;
-  const satPos = (sa) => {
-    const rx = Math.cos(sa) * ringR, ry = Math.sin(sa) * ringR;
-    const ca = Math.cos(-0.30), sn = Math.sin(-0.30);
-    const sx = rx, sy = ry * 0.30;
-    return [cx + sx * ca - sy * sn, cy + sx * sn + sy * ca];
-  };
-  const drawSat = (sa, front) => {
-    const [x, y] = satPos(sa);
-    ctx.fillStyle = "rgba(110,145,195," + al((front ? 0.95 : 0.28) * glow) + ")";
-    ctx.shadowColor = "rgba(100,140,195,0.7)"; ctx.shadowBlur = front ? 9 : 0;
-    ctx.beginPath(); ctx.arc(x, y, front ? 2.4 : 1.6, 0, 7); ctx.fill();
-    ctx.shadowBlur = 0;
-  };
-  for (let k = 0; k < 3; k++) {
-    const sa = satAngle(k);
-    if (Math.sin(sa) < 0) drawSat(sa, false);
+  // 5. Twinkling starburst glints on lattice nodes (staggered phases).
+  const limit = Math.min(sparkles.length, p.spark);
+  for (let k = 0; k < limit; k++) {
+    const sp = sparkles[k];
+    const x = px[sp.i], y = py[sp.i];
+    const dx = x - cx, dy = y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const edge = 1 - Math.min(1, Math.max(0, (dist - fadeR * 0.45) / (fadeR * 0.60)));
+    if (edge <= 0.01) continue;
+    const tw = 0.5 + 0.5 * Math.sin(t * p.twinkle * sp.rate + sp.ph);
+    const a = Math.pow(tw, 1.6) * glow * edge;
+    if (a < 0.02) continue;
+    drawGlintSpark(ctx, x, y, sp.s * (0.7 + 0.5 * tw), a);
   }
 
-  // 4. Outer HUD dial with tick marks + triangular markers (static frame)
-  const dialR = R * 0.47;
-  ctx.save(); ctx.translate(cx, cy);
-  ctx.strokeStyle = "rgba(160,190,220," + al(0.16 * glow + 0.06) + ")";
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.arc(0, 0, dialR, 0, 7); ctx.stroke();
-  for (let i = 0; i < 72; i++) {
-    const a = (i / 72) * Math.PI * 2;
-    const big = i % 6 === 0;
-    const r1 = dialR - (big ? 9 : 5);
-    ctx.strokeStyle = "rgba(170,200,230," + al((big ? 0.34 : 0.18) * glow + 0.05) + ")";
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
-    ctx.lineTo(Math.cos(a) * dialR, Math.sin(a) * dialR);
-    ctx.stroke();
-  }
-  ctx.fillStyle = "rgba(105,120,145," + al(0.55 * glow) + ")";
-  ctx.shadowColor = "rgba(105,120,145,0.8)"; ctx.shadowBlur = 6;
-  for (let k = 0; k < 4; k++) {
-    const a = Math.PI / 4 + k * Math.PI / 2;
-    ctx.save();
-    ctx.translate(Math.cos(a) * dialR, Math.sin(a) * dialR);
-    ctx.rotate(a + Math.PI / 2);
-    ctx.beginPath(); ctx.moveTo(0, -5); ctx.lineTo(4, 4); ctx.lineTo(-4, 4);
-    ctx.closePath(); ctx.fill();
-    ctx.restore();
-  }
-  ctx.shadowBlur = 0;
-  ctx.restore();
-
-  // 5. Faint middle circle
-  ctx.strokeStyle = "rgba(150,190,230," + al(0.10 * glow + 0.04) + ")";
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.arc(cx, cy, sR * 1.55, 0, 7); ctx.stroke();
-
-  // 6. Glass globe body
-  const sg = ctx.createRadialGradient(cx - sR * 0.35, cy - sR * 0.35, sR * 0.1, cx, cy, sR);
-  sg.addColorStop(0, "rgba(30,38,54,0.95)");
-  sg.addColorStop(0.55, "rgba(13,17,26,0.96)");
-  sg.addColorStop(1, "rgba(6,8,13,0.98)");
-  ctx.fillStyle = sg;
-  ctx.beginPath(); ctx.arc(cx, cy, sR, 0, 7); ctx.fill();
-
-  // 7. Rotating dotted continents
-  const spin = t * p.spin, D2R = 0.0174533;
-  for (const d of globeDots) {
-    const lon = d.lon * D2R + spin, lat = d.lat * D2R;
-    const cl = Math.cos(lat);
-    const x3 = cl * Math.sin(lon), y3 = Math.sin(lat), z3 = cl * Math.cos(lon);
-    if (z3 <= 0.03) continue; // back hemisphere hidden
-    const tw = 0.62 + 0.38 * Math.sin(t * 2.6 + d.ph);
-    const depth = 0.25 + 0.75 * z3;
-    const a = d.land ? (0.68 + 0.32 * tw) * depth * glow : 0.16 * tw * depth * glow;
-    ctx.fillStyle = d.land
-      ? (d.blue ? "rgba(100,140,195," + al(a) + ")" : "rgba(75,90,115," + al(a) + ")")
-      : "rgba(165,180,200," + al(a) + ")";
-    const sz = d.s * (0.45 + 0.55 * z3);
-    ctx.beginPath();
-    ctx.arc(cx + x3 * sR * 0.94, cy - y3 * sR * 0.94, sz, 0, 7);
-    ctx.fill();
-  }
-
-  // Bright "city light" hubs on the continents — the premium sparkle.
-  for (const d of globeDots) {
-    if (!d.hub) continue;
-    const lon = d.lon * D2R + spin, lat = d.lat * D2R;
-    const cl = Math.cos(lat);
-    const x3 = cl * Math.sin(lon), y3 = Math.sin(lat), z3 = cl * Math.cos(lon);
-    if (z3 <= 0.15) continue;
-    const tw = 0.6 + 0.4 * Math.sin(t * 3.2 + d.ph * 2);
-    ctx.fillStyle = d.blue
-      ? "rgba(85,125,185," + al(0.9 * tw * glow) + ")"
-      : "rgba(70,85,110," + al(0.9 * tw * glow) + ")";
-    ctx.shadowColor = d.blue ? "rgba(100,140,195,0.7)" : "rgba(140,155,180,0.9)";
-    ctx.shadowBlur = 7;
-    ctx.beginPath(); ctx.arc(cx + x3 * sR * 0.94, cy - y3 * sR * 0.94, 2.1, 0, 7); ctx.fill();
-  }
-  ctx.shadowBlur = 0;
-
-  // 8. Fresnel rim light, brightest on the left limb
-  if (ctx.createConicGradient) {
-    const cg = ctx.createConicGradient(Math.PI, cx, cy);
-    cg.addColorStop(0, "rgba(140,155,180," + al(0.95 * glow) + ")");
-    cg.addColorStop(0.25, "rgba(255,140,50," + al(0.30 * glow) + ")");
-    cg.addColorStop(0.5, "rgba(140,200,255," + al(0.45 * glow) + ")");
-    cg.addColorStop(0.75, "rgba(120,170,230," + al(0.12 * glow) + ")");
-    cg.addColorStop(1, "rgba(140,155,180," + al(0.95 * glow) + ")");
-    ctx.strokeStyle = cg; ctx.lineWidth = 2.8;
-    ctx.shadowColor = "rgba(105,120,145,0.85)"; ctx.shadowBlur = 12 * glow;
-    ctx.beginPath(); ctx.arc(cx, cy, sR - 1, 0, 7); ctx.stroke();
-    ctx.shadowBlur = 0;
-  }
-  // thin inner highlight just inside the rim
-  ctx.strokeStyle = "rgba(200,230,255," + al(0.35 * glow) + ")";
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.arc(cx, cy, sR - 4, 0, 7); ctx.stroke();
-
-  // soft top sheen
-  const sh = ctx.createLinearGradient(cx - sR, cy - sR, cx + sR * 0.3, cy + sR * 0.3);
-  sh.addColorStop(0, "rgba(255,255,255," + al(0.10 * glow) + ")");
-  sh.addColorStop(0.4, "rgba(255,255,255,0)");
-  ctx.fillStyle = sh;
-  ctx.beginPath(); ctx.arc(cx, cy, sR, 0, 7); ctx.fill();
-
-  // Radar sweep — a soft scanner wedge circling the globe.
-  if (ctx.createConicGradient) {
-    const swA = (t * 0.9) % (Math.PI * 2);
-    const sw = ctx.createConicGradient(swA, cx, cy);
-    sw.addColorStop(0, "rgba(100,140,195," + al(0.22 * glow) + ")");
-    sw.addColorStop(0.10, "rgba(100,140,195," + al(0.05 * glow) + ")");
-    sw.addColorStop(0.25, "rgba(100,140,195,0)");
-    sw.addColorStop(1, "rgba(100,140,195,0)");
-    ctx.fillStyle = sw;
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, sR, 0, 7); ctx.fill();
-  }
-
-  // 9. Orbit ring front half (passes in front of the globe)
-  strokeRing(0, Math.PI, "rgba(160,220,255," + al(0.80 * glow) + ")", 2, 12);
-
-  // 9b. Orbiting satellites (front half, full brightness).
-  for (let k = 0; k < 3; k++) {
-    const sa = satAngle(k);
-    if (Math.sin(sa) >= 0) drawSat(sa, true);
-  }
-
-  // 9c. Soft floor reflection beneath the globe.
-  ctx.save(); ctx.translate(cx, cy + sR * 1.04); ctx.scale(1, 0.26);
-  const rfl = ctx.createLinearGradient(0, -sR * 0.2, 0, sR * 1.1);
-  rfl.addColorStop(0, "rgba(140,155,180," + al(0.12 * glow) + ")");
-  rfl.addColorStop(1, "rgba(140,155,180,0)");
-  ctx.fillStyle = rfl;
-  ctx.beginPath(); ctx.arc(0, 0, sR * 0.85, 0, 7); ctx.fill();
-  ctx.restore();
-
-  // 10. Speaking ripple rings
+  // 6. Speaking ripple rings.
   if (coreState === "speaking") {
     for (let i = 0; i < 2; i++) {
       const ph = (t * 0.9 + i * 0.5) % 1;
-      ctx.strokeStyle = "rgba(105,120,145," + al((1 - ph) * 0.5 * glow) + ")";
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(cx, cy, sR + ph * (R * 0.40 + p.pulse), 0, 7); ctx.stroke();
+      ctx.strokeStyle = "rgba(20,24,32," + al((1 - ph) * 0.45 * glow) + ")";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(cx, cy, fadeR * 0.4 + ph * (R * 0.30 + p.pulse), 0, 7); ctx.stroke();
     }
   }
 }
