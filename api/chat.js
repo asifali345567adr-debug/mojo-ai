@@ -91,13 +91,36 @@ export default async function handler(req, res) {
         const forwardAbort = () => mc.abort();
         overall.signal.addEventListener("abort", forwardAbort);
         try {
+          // Speed: for plain text chat, ask the provider to skip its invisible
+          // "thinking" (reasoning) phase so the first answer token arrives as
+          // soon as possible. Vision requests keep the provider default.
+          const plainBody = () => ({
+            model: models[i],
+            messages: buildMessages(body),
+            stream: true,
+          });
+          const skipThinking = !hasImage;
+          const reqBody = plainBody();
+          if (skipThinking) reqBody.reasoning = { effort: "none" };
           out = await providerPost(
             `${API_URL}/chat/completions`,
-            { model: models[i], messages: buildMessages(body), stream: true },
+            reqBody,
             mc.signal,
             models.length === 1 ? 3 : 2,
             activeKey
           );
+          const rs = out.status || 0;
+          if (!out.ok && skipThinking && rs >= 400 && rs < 500 && rs !== 429) {
+            // This provider rejected the reasoning toggle: retry once with a
+            // plain request instead of failing the chat.
+            out = await providerPost(
+              `${API_URL}/chat/completions`,
+              plainBody(),
+              mc.signal,
+              1,
+              activeKey
+            );
+          }
         } catch (e) {
           // Per-model deadline hit (AbortError) or a sync failure: record it
           // and move on to the next model in the chain.
