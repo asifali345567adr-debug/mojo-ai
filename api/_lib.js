@@ -7,8 +7,8 @@ export const API_URL = (process.env.AI_API_URL || "https://openrouter.ai/api/v1"
 export const MODEL = process.env.AI_MODEL || "deepseek/deepseek-v4-flash-0731:free";
 // Used automatically when a message includes an image (MODEL can't read images).
 // Reliability-ordered: Google's free Gemma vision endpoints are the most stable
-// on the free tier; Nvidia's Nemotron VL is the OCR specialist; Gemma 3 27B is
-// the older-but-reliable anchor. The backend walks primary + three fallbacks
+// on the free tier; Nvidia's Nemotron omni model and Qwen's VL model add provider
+// diversity as further fallbacks. The backend walks primary + three fallbacks
 // from different providers before the user ever sees an error.
 export const VISION_MODEL = process.env.AI_VISION_MODEL || "google/gemma-4-31b-it:free";
 // Backup vision model: free providers go down often, so if the primary vision
@@ -19,9 +19,9 @@ export const VISION_FALLBACK_MODEL =
 // Second and third backup vision models from different providers, for the same
 // walk-the-chain resilience.
 export const VISION_FALLBACK2_MODEL =
-  process.env.AI_VISION_FALLBACK2_MODEL || "nvidia/nemotron-nano-12b-v2-vl:free";
+  process.env.AI_VISION_FALLBACK2_MODEL || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
 export const VISION_FALLBACK3_MODEL =
-  process.env.AI_VISION_FALLBACK3_MODEL || "google/gemma-3-27b-it:free";
+  process.env.AI_VISION_FALLBACK3_MODEL || "qwen/qwen3.8-27b:free";
 
 // Image-analysis mastery: appended to the system prompt on vision requests, so
 // Mojo reads any photo like the best visual analyst in the room.
