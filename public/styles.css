@@ -703,7 +703,7 @@ textarea.text-input { resize: vertical; min-height: 66px; line-height: 1.5; font
     pointer-events: none; z-index: 1;
   }
   #mobileAvatar img { width: 42px; height: 42px; border-radius: 50%; display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.18); }
-  #mobileAvatar span { font-size: 12px; font-weight: 600; color: var(--text); margin-top: 3px; letter-spacing: 0.02em; }
+  #mobileAvatar span { font-size: 17px; font-weight: 700; color: var(--text); margin-top: 4px; letter-spacing: 0.04em; line-height: 1; }
   #inviteBtn { margin-left: auto; }
   #inviteBtn {
     display: inline-flex; align-items: center; justify-content: center;
