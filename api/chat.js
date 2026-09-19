@@ -178,7 +178,7 @@ export default async function handler(req, res) {
     noStore(res);
     const timedOut = e && e.name === "AbortError";
     return res.status(timedOut ? 504 : 502).json({
-      error: timedOut ? 504 : 502,
+            error: timedOut ? "AI_TIMEOUT" : "AI_CONNECTION_ERROR",
       detail: timedOut
         ? "The AI provider took too long to respond. Please try again."
         : "Couldn't reach the AI provider. Please try again.",
