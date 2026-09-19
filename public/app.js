@@ -687,20 +687,21 @@ function renderMessages() {
   stage.classList.toggle("docked", !!has);
   requestAnimationFrame(sizeCore);
   if (!has) return;
-  for (const m of c.messages) {
+  for (let i = 0; i < c.messages.length; i++) {
+    const m = c.messages[i];
     if (m.role === "error") appendErrorBubble(m.text, false);
     else if (m.kind === "genimg" && m.imgId && sessionImages.has(m.imgId)) {
       const e = sessionImages.get(m.imgId);
       appendGeneratedImage(m.imgId, e.url, e.type, false);
     }
-    else appendMessageBubble(m.role, m.text, m.img, false);
+    else appendMessageBubble(m.role, m.text, m.img, false, i);
   }
   scrollBottom();
 }
 function avatarFor(role) {
   return role === "user" ? "YOU" : "M";
 }
-function appendMessageBubble(role, text, img, animate) {
+function appendMessageBubble(role, text, img, animate, msgIndex) {
   const wrap = $("#messages");
   const div = document.createElement("div");
   div.className = "msg " + role;
@@ -722,8 +723,57 @@ function appendMessageBubble(role, text, img, animate) {
   } else {
     body.innerHTML = renderMarkdown(text || "");
   }
+  // Premium message actions: Copy on every text bubble, Edit on your own.
+  if (msgIndex != null) attachMessageActions(div, msgIndex, role, text);
   scrollBottom();
   return body;
+}
+/* Small Copy / Edit pill row under a message bubble. */
+function attachMessageActions(msgDiv, idx, role, text) {
+  if (idx == null || !text || !msgDiv) return;
+  const bub = msgDiv.querySelector(".bubble");
+  if (!bub || bub.querySelector(".msg-actions")) return;
+  const row = document.createElement("div");
+  row.className = "msg-actions";
+  const mk = (label, fn) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "msg-act"; b.textContent = label;
+    b.setAttribute("aria-label", label + " message");
+    b.addEventListener("click", (ev) => { ev.stopPropagation(); fn(); });
+    return b;
+  };
+  row.appendChild(mk("Copy", () => copyText(text)));
+  if (role === "user") row.appendChild(mk("Edit", () => editUserMessage(idx)));
+  bub.appendChild(row);
+}
+function copyText(t) {
+  const done = () => toast("Copied, sir.");
+  const fallback = () => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      document.execCommand("copy"); ta.remove(); done();
+    } catch (e) { toast("Couldn't copy that."); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(done, fallback);
+  } else fallback();
+}
+/* Edit your message: drop it and everything after, put the text back in the
+   box for editing — the reply regenerates when you send again. */
+function editUserMessage(idx) {
+  const c = getActive();
+  if (!c || !c.messages[idx] || c.messages[idx].role !== "user") return;
+  if (sending || generatingImage) { toast("Wait for the reply to finish first."); return; }
+  const m = c.messages[idx];
+  c.messages = c.messages.slice(0, idx);
+  c.updatedAt = Date.now(); saveConvs();
+  renderMessages();
+  renderSidebar($("#searchInput").value);
+  $("#input").value = m.text || "";
+  autoresize();
+  $("#input").focus();
 }
 function appendErrorBubble(text, save) {
   const wrap = $("#messages");
@@ -897,6 +947,7 @@ async function sendMessage(text) {
         bodyEl.innerHTML = renderMarkdown(reply);
         scrollBottom(false);
         c.messages.push({ role: "assistant", text: reply, ts: Date.now() });
+        attachMessageActions(row, c.messages.length - 1, "assistant", reply);
         c.updatedAt = Date.now(); saveConvs();
         renderSidebar($("#searchInput").value);
         speakStreamEnd(); // speak any trailing sentence fragment
@@ -910,7 +961,7 @@ async function sendMessage(text) {
         const reply = data.reply || "I didn't get a response. Please try again.";
         c.messages.push({ role: "assistant", text: reply, ts: Date.now() });
         c.updatedAt = Date.now(); saveConvs();
-        appendMessageBubble("assistant", reply, null, true);
+        appendMessageBubble("assistant", reply, null, true, c.messages.length - 1);
         speak(reply);
       }
     }
