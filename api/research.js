@@ -1,9 +1,9 @@
-// POST /api/research — web research using the user's OWN Brave Search key.
+// POST /api/research — web research using the user's OWN Tavily API key.
 //
 // The key arrives in the request body and is used only for this single
 // proxied search: never logged, never stored server-side, never echoed back.
-// Brave gives 2,000 free searches/month per key, so research bills to the
-// user's own Brave account — not to Mojo.
+// Tavily's free tier gives 1,000 free searches/month per key (no card), so
+// research bills to the user's own Tavily account — not to Mojo.
 import { clientIp, rateLimited, fetchWithTimeout, noStore } from "./_lib.js";
 
 const MAX_KEY_CHARS = 200;
@@ -34,29 +34,30 @@ export default async function handler(req, res) {
 
   if (!apiKey || apiKey.length > MAX_KEY_CHARS) {
     noStore(res);
-    return res.status(400).json({ error: "bad_api_key", detail: "A Brave Search API key is required for Research." });
+    return res.status(400).json({ error: "bad_api_key", detail: "A Tavily API key is required for Research." });
   }
   if (!query || query.length > MAX_QUERY_CHARS) {
     noStore(res);
     return res.status(400).json({ error: "empty_query", detail: "Type what you want researched first." });
   }
 
-  const url =
-    "https://api.search.brave.com/res/v1/web/search?q=" +
-    encodeURIComponent(query) +
-    "&count=" + RESULT_COUNT +
-    "&safesearch=moderate&freshness=py";
 
   let resp;
   try {
     resp = await fetchWithTimeout(
-      url,
+      "https://api.tavily.com/search",
       {
-        method: "GET",
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           Accept: "application/json",
-          "X-Subscription-Token": apiKey,
         },
+        body: JSON.stringify({
+          api_key: apiKey,
+          query,
+          search_depth: "basic",
+          max_results: RESULT_COUNT,
+        }),
       },
       RESEARCH_TIMEOUT_MS
     );
@@ -67,7 +68,7 @@ export default async function handler(req, res) {
 
   if (resp.status === 401 || resp.status === 403) {
     noStore(res);
-    return res.status(400).json({ error: "bad_search_key", detail: "That Brave key was rejected. Check it and try again." });
+    return res.status(400).json({ error: "bad_search_key", detail: "That Tavily key was rejected. Check it and try again." });
   }
   if (resp.status === 429) {
     noStore(res);
@@ -79,11 +80,11 @@ export default async function handler(req, res) {
   }
 
   const data = await resp.json().catch(() => null);
-  const web = (data && data.web && Array.isArray(data.web.results)) ? data.web.results : [];
-  const results = web.slice(0, RESULT_COUNT).map(r => ({
+  const hits = (data && Array.isArray(data.results)) ? data.results : [];
+  const results = hits.slice(0, RESULT_COUNT).map(r => ({
     title: String(r.title || "Untitled").slice(0, 160),
     url: String(r.url || "").slice(0, 300),
-    snippet: String(r.description || "").slice(0, 400),
+    snippet: String(r.content || "").slice(0, 400),
   })).filter(r => r.url);
 
   noStore(res);
