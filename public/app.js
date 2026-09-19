@@ -176,7 +176,7 @@ function initAmbient() {
   (function loop(t) { draw(t); requestAnimationFrame(loop); })(0);
 }
 
-/* ================= Glint core : black lattice + starbursts on white ================= */
+/* ================= Glint core : black lattice + starbursts on grey ================= */
 const CORE_STATES = {
   idle:      { drift: 1.0, glow: 0.80, twinkle: 1.6, spark: 22, pulse: 6,  label: "Idle" },
   listening: { drift: 1.7, glow: 1.00, twinkle: 2.6, spark: 30, pulse: 12, label: "Listening" },
@@ -305,10 +305,10 @@ function drawCore(t) {
   for (const e of meshEdges) { ctx.moveTo(px[e[0]], py[e[0]]); ctx.lineTo(px[e[1]], py[e[1]]); }
   ctx.stroke();
 
-  // 4. Fade the lattice into the white background at the edges.
+  // 4. Fade the lattice into the grey background at the edges.
   const fade = ctx.createRadialGradient(cx, cy, R * 0.30, cx, cy, R * 0.68);
-  fade.addColorStop(0, "rgba(255,255,255,0)");
-  fade.addColorStop(1, "rgba(255,255,255,1)");
+  fade.addColorStop(0, "rgba(228,229,233,0)");
+  fade.addColorStop(1, "rgba(228,229,233,1)");
   ctx.fillStyle = fade; ctx.fillRect(0, 0, coreW, coreH);
 
   // 5. Twinkling starburst glints on lattice nodes (staggered phases).
@@ -506,7 +506,7 @@ function openConversation(id) {
   activeId = id;
   renderSidebar($("#searchInput").value);
   renderMessages();
-  closeMobileSidebar();
+  if (isMobileLayout()) closeSidebar(); // drawer only; desktop sidebar stays put
 }
 function renameConversation(id, titleEl) {
   const c = conversations.find(x => x.id === id);
@@ -538,7 +538,7 @@ function startNewChat() {
   renderSidebar($("#searchInput").value);
   renderMessages();
   $("#input").focus();
-  closeMobileSidebar();
+  if (isMobileLayout()) closeSidebar(); // drawer only; desktop sidebar stays put
 }
 
 /* ================= Messages ================= */
@@ -1293,15 +1293,78 @@ function submitFromComposer() {
   sendMessage($("#input").value);
 }
 
-/* ================= Sidebar / drawer (mobile) ================= */
-function closeMobileSidebar() {
-  $("#sidebar").classList.remove("open");
-  $("#scrim").classList.remove("open");
+/* ================= Sidebar: click or drag to open (like Muse's side panel) ================= */
+function isMobileLayout() { return matchMedia("(max-width: 900px)").matches; }
+function openSidebar() {
+  if (isMobileLayout()) {
+    $("#sidebar").classList.add("open");
+    $("#scrim").classList.add("open");
+  } else {
+    $("#app").classList.remove("side-collapsed");
+    try { localStorage.setItem("mojo.sideCollapsed.v1", "0"); } catch (e) {}
+  }
 }
-function openMobileSidebar() {
-  $("#sidebar").classList.add("open");
-  $("#scrim").classList.add("open");
+function closeSidebar() {
+  if (isMobileLayout()) {
+    $("#sidebar").classList.remove("open");
+    $("#scrim").classList.remove("open");
+  } else {
+    $("#app").classList.add("side-collapsed");
+    try { localStorage.setItem("mojo.sideCollapsed.v1", "1"); } catch (e) {}
+  }
 }
+function toggleSidebar() {
+  const open = isMobileLayout()
+    ? $("#sidebar").classList.contains("open")
+    : !$("#app").classList.contains("side-collapsed");
+  if (open) closeSidebar(); else openSidebar();
+}
+// Mobile swipe: drag in from the left edge to open, drag the drawer back to close.
+function initSidebarGestures() {
+  const side = $("#sidebar"), scrim = $("#scrim");
+  const EDGE = 28, THRESH = 70;
+  let drag = null;
+  document.addEventListener("touchstart", e => {
+    if (!isMobileLayout() || e.touches.length !== 1) { drag = null; return; }
+    const t = e.touches[0];
+    const open = side.classList.contains("open");
+    const w = side.offsetWidth || 300;
+    if (!open && t.clientX <= EDGE) drag = { mode: "open", x0: t.clientX, y0: t.clientY, w, on: false };
+    else if (open && t.clientX < w) drag = { mode: "close", x0: t.clientX, y0: t.clientY, w, on: false };
+    else drag = null;
+  }, { passive: true });
+  document.addEventListener("touchmove", e => {
+    if (!drag || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - drag.x0, dy = t.clientY - drag.y0;
+    if (!drag.on) {
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; } // vertical scroll wins
+      if (Math.abs(dx) < 10) return;
+      drag.on = true;
+      side.classList.add("dragging");
+    }
+    e.preventDefault();
+    let x;
+    if (drag.mode === "open") x = Math.min(0, -drag.w + Math.max(0, dx));
+    else x = Math.min(0, Math.max(-drag.w, dx));
+    side.style.transform = "translateX(" + x.toFixed(1) + "px)";
+    scrim.style.opacity = (0.45 * Math.max(0, (x + drag.w) / drag.w)).toFixed(2);
+  }, { passive: false });
+  function end(e) {
+    if (!drag) return;
+    const t = e.changedTouches && e.changedTouches[0];
+    const dx = t ? t.clientX - drag.x0 : 0;
+    side.classList.remove("dragging");
+    side.style.transform = "";
+    scrim.style.opacity = "";
+    const shouldOpen = drag.mode === "open" ? dx > THRESH : dx > -THRESH;
+    drag = null;
+    if (shouldOpen) openSidebar(); else closeSidebar();
+  }
+  document.addEventListener("touchend", end, { passive: true });
+  document.addEventListener("touchcancel", end, { passive: true });
+}
+
 function openDrawer() {
   $("#settingsDrawer").classList.add("open");
   $("#drawerScrim").classList.add("open");
@@ -1366,11 +1429,17 @@ function init() {
   // Suggestion cards
   $$(".sugg").forEach(s => s.addEventListener("click", () => sendMessage(s.getAttribute("data-send") || "")));
 
-  // Sidebar
+  // Sidebar: click or drag to open; desktop collapse state persists.
+  initSidebarGestures();
+  try {
+    if (!isMobileLayout() && localStorage.getItem("mojo.sideCollapsed.v1") === "1") {
+      $("#app").classList.add("side-collapsed");
+    }
+  } catch (e) {}
   $("#newChatBtn").addEventListener("click", startNewChat);
   $("#searchInput").addEventListener("input", e => renderSidebar(e.target.value));
-  $("#menuBtn").addEventListener("click", openMobileSidebar);
-  $("#scrim").addEventListener("click", closeMobileSidebar);
+  $("#menuBtn").addEventListener("click", toggleSidebar);
+  $("#scrim").addEventListener("click", closeSidebar);
 
   // Settings drawer
   $("#settingsBtn").addEventListener("click", () => { renderStatus(); syncBrainKeyUI(); openDrawer(); });
@@ -1401,9 +1470,9 @@ function init() {
     toast("All conversations deleted.");
   });
 
-  // Escape closes drawer / mobile sidebar
+  // Escape closes drawer / sidebar
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { closeDrawer(); closeMobileSidebar(); }
+    if (e.key === "Escape") { closeDrawer(); closeSidebar(); }
   });
 }
 
