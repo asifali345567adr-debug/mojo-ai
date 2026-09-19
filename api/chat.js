@@ -107,6 +107,7 @@ export default async function handler(req, res) {
             model: models[i],
             messages: buildMessages(body),
             stream: true,
+            temperature: 0.7,
           });
           const skipThinking = !hasImage && !usePollinations;
           const reqBody = plainBody();
@@ -177,7 +178,7 @@ export default async function handler(req, res) {
     noStore(res);
     const timedOut = e && e.name === "AbortError";
     return res.status(timedOut ? 504 : 502).json({
-      error: timedOut ? "AI_TIMEOUT" : "AI_CONNECTION_ERROR",
+      error: timedOut ? 504 : 502,
       detail: timedOut
         ? "The AI provider took too long to respond. Please try again."
         : "Couldn't reach the AI provider. Please try again.",
