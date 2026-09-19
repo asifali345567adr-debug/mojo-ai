@@ -728,23 +728,50 @@ function appendMessageBubble(role, text, img, animate, msgIndex) {
   scrollBottom();
   return body;
 }
-/* Small Copy / Edit pill row under a message bubble. */
+/* ChatGPT-style message actions: icon-only. Assistant gets a small icon row
+   under the reply (always visible); your bubble reveals icons floating to
+   its left on hover (desktop) or tap (touch). */
+const ICON_COPY = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5v-2a1.6 1.6 0 0 0-1.6-1.6H3.6a1.6 1.6 0 0 0-1.6 1.6v5.3a1.6 1.6 0 0 0 1.6 1.6h2"/></svg>';
+const ICON_EDIT = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11.8 2.2a1.4 1.4 0 0 1 2 2L5.3 12.7 2 13.9l1.2-3.3z"/></svg>';
 function attachMessageActions(msgDiv, idx, role, text) {
   if (idx == null || !text || !msgDiv) return;
-  const bub = msgDiv.querySelector(".bubble");
-  if (!bub || bub.querySelector(".msg-actions")) return;
-  const row = document.createElement("div");
-  row.className = "msg-actions";
-  const mk = (label, fn) => {
+  if (msgDiv.querySelector(".msg-actions")) return;
+  const mk = (icon, label, fn) => {
     const b = document.createElement("button");
-    b.type = "button"; b.className = "msg-act"; b.textContent = label;
-    b.setAttribute("aria-label", label + " message");
+    b.type = "button"; b.className = "msg-act"; b.innerHTML = icon;
+    b.setAttribute("aria-label", label); b.title = label;
     b.addEventListener("click", (ev) => { ev.stopPropagation(); fn(); });
     return b;
   };
-  row.appendChild(mk("Copy", () => copyText(text)));
-  if (role === "user") row.appendChild(mk("Edit", () => editUserMessage(idx)));
-  bub.appendChild(row);
+  if (role === "assistant") {
+    const bub = msgDiv.querySelector(".bubble");
+    if (!bub) return;
+    const row = document.createElement("div");
+    row.className = "msg-actions";
+    row.appendChild(mk(ICON_COPY, "Copy", () => copyText(text)));
+    bub.appendChild(row);
+  } else {
+    const row = document.createElement("div");
+    row.className = "msg-actions side";
+    row.appendChild(mk(ICON_COPY, "Copy", () => copyText(text)));
+    row.appendChild(mk(ICON_EDIT, "Edit", () => editUserMessage(idx)));
+    msgDiv.appendChild(row);
+    const bub = msgDiv.querySelector(".bubble");
+    const place = () => {
+      if (!bub) return;
+      const r = bub.getBoundingClientRect(), m = msgDiv.getBoundingClientRect();
+      row.style.top = (r.top - m.top + r.height / 2) + "px";
+      row.style.right = (m.right - r.left + 10) + "px";
+    };
+    const show = () => { place(); msgDiv.classList.add("show-actions"); };
+    const hide = () => msgDiv.classList.remove("show-actions");
+    if (window.matchMedia && matchMedia("(hover: hover)").matches) {
+      msgDiv.addEventListener("mouseenter", show);
+      msgDiv.addEventListener("mouseleave", hide);
+    } else if (bub) {
+      bub.addEventListener("click", () => msgDiv.classList.contains("show-actions") ? hide() : show());
+    }
+  }
 }
 function copyText(t) {
   const done = () => toast("Copied, sir.");
@@ -1423,6 +1450,10 @@ function init() {
 
   // Composer
   $("#sendBtn").addEventListener("click", submitFromComposer);
+  // Scrolling the chat dismisses any open per-message action popups.
+  $("#chatScroll").addEventListener("scroll", () => {
+    document.querySelectorAll(".msg.show-actions").forEach(d => d.classList.remove("show-actions"));
+  }, { passive: true });
   $("#input").addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitFromComposer(); }
   });
