@@ -196,8 +196,12 @@ export async function providerPost(url, bodyObj, signal, attempts = 3, apiKey = 
       } catch (e) {}
       // Retry transient failures: server errors (5xx) and rate limits (429).
       // Free OpenRouter providers rate-limit often; a short backoff usually
-      // clears it. Other 4xx errors are final and are never retried.
-      const retryable = resp.status >= 500 || resp.status === 429;
+      // clears it. EXCEPTION: a daily-quota 429 ("per-day") is never retried —
+      // the quota only resets at midnight UTC, and failed requests count too,
+      // so retrying just burns more quota. Other 4xx errors are final and are
+      // never retried.
+      const dailyLimit = resp.status === 429 && /per-day/i.test(lastErrText);
+      const retryable = (resp.status >= 500 || resp.status === 429) && !dailyLimit;
       if (!retryable || attempt === attempts) break;
     } catch (e) {
       if (e && e.name === "AbortError") throw e;
@@ -213,6 +217,19 @@ export async function providerPost(url, bodyObj, signal, attempts = 3, apiKey = 
   } catch (e) {}
   detail = String(detail || "").slice(0, 200);
   return { ok: false, status: lastStatus, detail: detail || `provider HTTP ${lastStatus}` };
+}
+
+// When OpenRouter's free daily quota is exhausted, say so honestly instead of
+// "temporarily down": the user needs to know it resets at midnight UTC, and
+// that a one-time $10 credit purchase unlocks 1,000 free requests/day.
+export function friendlyDetail(detail, fallback) {
+  const d = String(detail || "");
+  if (/per-day/i.test(d))
+    return (
+      "Today's free AI quota is used up — it resets at midnight UTC. " +
+      "For 1,000 free requests/day, add a one-time $10 credit on your OpenRouter account (free models stay $0)."
+    );
+  return d || fallback;
 }
 
 // API responses are never cacheable.

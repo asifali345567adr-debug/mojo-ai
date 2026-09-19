@@ -15,6 +15,7 @@ import {
   providerPost,
   userKeyFromReq,
   noStore,
+  friendlyDetail,
 } from "./_lib.js";
 
 export default async function handler(req, res) {
@@ -83,7 +84,6 @@ export default async function handler(req, res) {
     const overall = new AbortController();
     const overallTimer = setTimeout(() => overall.abort(), PROVIDER_TIMEOUT_MS);
     let out;
-    const tried = [];
     try {
       for (let i = 0; i < models.length; i++) {
         if (overall.signal.aborted) break; // overall deadline hit: stop
@@ -134,7 +134,6 @@ export default async function handler(req, res) {
           clearTimeout(mt);
           overall.signal.removeEventListener("abort", forwardAbort);
         }
-        tried.push({ model: models[i], ok: !!out.ok, status: out.status || 0, detail: String(out.detail || "").slice(0, 160) });
         if (out.ok) break;
         const s = out.status || 0;
         // A 404 means this model id no longer exists on the provider (common
@@ -152,12 +151,13 @@ export default async function handler(req, res) {
       if (hasImage) {
         return res.status(502).json({
           error: "AI_CONNECTION_ERROR",
-          detail:
-            "The image reader is temporarily down on the provider's side. Please try again in a little while.",
-          vision_debug: tried,
+          detail: friendlyDetail(
+            out.detail,
+            "The image reader is temporarily down on the provider's side. Please try again in a little while."
+          ),
         });
       }
-      const detail = out.detail || "The AI provider returned an error.";
+      const detail = friendlyDetail(out.detail, "The AI provider returned an error.");
       return res
         .status(502)
         .json({ error: "AI_CONNECTION_ERROR", detail });
