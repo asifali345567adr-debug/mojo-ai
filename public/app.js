@@ -7,6 +7,7 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 const LS_CONV = "mojo.conversations.v1";
+const LS_ACTIVE = "mojo.active.v1";
 const LS_SETTINGS = "mojo.settings.v1";
 const LS_BRAIN_KEY = "mojo.brain.key.v1"; // personal API key, stored only in this browser
 
@@ -39,6 +40,7 @@ let voices = [];
 function saveConvs() {
   try {
     localStorage.setItem(LS_CONV, JSON.stringify(conversations));
+    localStorage.setItem(LS_ACTIVE, activeId || "");
   } catch (e) {
     // Quota (large images): retry with images stripped.
     try {
@@ -53,6 +55,10 @@ function loadConvs() {
   try {
     const raw = localStorage.getItem(LS_CONV);
     if (raw) { const p = JSON.parse(raw); if (Array.isArray(p)) conversations = p; }
+    // Resume the last open chat so new images/messages keep landing in it
+    // instead of spawning a fresh conversation after every reload.
+    const aid = localStorage.getItem(LS_ACTIVE) || "";
+    activeId = (aid && conversations.some(c => c.id === aid)) ? aid : null;
   } catch (e) { conversations = []; }
 }
 function saveSettings() { try { localStorage.setItem(LS_SETTINGS, JSON.stringify(settings)); } catch (e) {} }
@@ -1157,8 +1163,10 @@ async function generateImage() {
       signal: ctrl.signal
     });
     const ct = res.headers.get("content-type") || "";
-    removeImagePlaceholder();
     if (!res.ok || !ct.startsWith("image/")) {
+      // Keep the shimmer up until we know the outcome; the blob download
+      // below can take a few seconds after headers arrive.
+      removeImagePlaceholder();
       const data = await res.json().catch(() => ({}));
       handleImageError(data.error, data.detail, res.status);
     } else {
@@ -1170,6 +1178,7 @@ async function generateImage() {
       // Persist only the tiny imgId — never the blob URL (dies with the page)
       // and never the bytes (localStorage quota). After a reload the caption
       // remains but the picture is gone, same as before.
+      removeImagePlaceholder();
       c.messages.push({ role: "assistant", kind: "genimg", imgId, text: "Here's your image, sir.", ts: Date.now() });
       c.updatedAt = Date.now(); saveConvs();
       appendGeneratedImage(imgId, url, type, true);
@@ -1212,7 +1221,8 @@ function imgExtFor(type) {
   if (type === "image/gif") return ".gif";
   return ".jpg";
 }
-/* Generated image bubble: the picture plus a Download button underneath. */
+/* Generated image bubble: the picture only — tap it to open the viewer
+   with Download / Delete. No download pill inside the chat itself. */
 function appendGeneratedImage(imgId, url, type, animate) {
   const wrap = $("#messages");
   const div = document.createElement("div");
@@ -1223,24 +1233,72 @@ function appendGeneratedImage(imgId, url, type, animate) {
   const bub = document.createElement("div");
   bub.className = "bubble";
   const im = document.createElement("img");
-  im.className = "msg-img"; im.src = url; im.alt = "Generated image";
+  im.className = "msg-img genimg-click"; im.src = url; im.alt = "Generated image";
+  im.addEventListener("click", () => openImageViewer(imgId));
   bub.appendChild(im);
-  const row = document.createElement("div");
-  row.className = "img-actions";
-  const dl = document.createElement("a");
-  dl.className = "img-dl";
-  dl.href = url;
-  dl.download = "mojo-image" + imgExtFor(type);
-  dl.textContent = "Download";
-  row.appendChild(dl);
-  bub.appendChild(row);
   const body = document.createElement("div");
   bub.appendChild(body);
   div.appendChild(av); div.appendChild(bub);
   wrap.appendChild(div);
-  if (animate) typewriter(body, "Here's your image, sir.", () => { scrollBottom(); });
-  else body.innerHTML = renderMarkdown("Here's your image, sir.");
+  const caption = "Here's your image, sir — tap it to view full size.";
+  if (animate) typewriter(body, caption, () => { scrollBottom(); });
+  else body.innerHTML = renderMarkdown(caption);
   scrollBottom();
+}
+/* Full-screen image viewer: Download and Delete live here, not in chat. */
+function openImageViewer(imgId) {
+  const e = sessionImages.get(imgId);
+  if (!e) return;
+  closeImageViewer();
+  const ov = document.createElement("div");
+  ov.id = "imgViewer";
+  ov.className = "img-viewer";
+  const card = document.createElement("div");
+  card.className = "img-viewer-card";
+  const close = document.createElement("button");
+  close.className = "img-viewer-close";
+  close.setAttribute("aria-label", "Close");
+  close.textContent = "×";
+  const im = document.createElement("img");
+  im.className = "img-viewer-img";
+  im.src = e.url; im.alt = "Generated image";
+  const actions = document.createElement("div");
+  actions.className = "img-viewer-actions";
+  const dl = document.createElement("a");
+  dl.className = "img-viewer-btn";
+  dl.href = e.url;
+  dl.download = "mojo-image" + imgExtFor(e.type);
+  dl.textContent = "Download";
+  const del = document.createElement("button");
+  del.className = "img-viewer-btn danger";
+  del.textContent = "Delete";
+  del.addEventListener("click", () => deleteGeneratedImage(imgId));
+  actions.appendChild(dl); actions.appendChild(del);
+  card.appendChild(close); card.appendChild(im); card.appendChild(actions);
+  const back = document.createElement("div");
+  back.className = "img-viewer-backdrop";
+  ov.appendChild(back); ov.appendChild(card);
+  document.body.appendChild(ov);
+  document.body.style.overflow = "hidden";
+  back.addEventListener("click", closeImageViewer);
+  close.addEventListener("click", closeImageViewer);
+}
+function closeImageViewer() {
+  const ov = document.getElementById("imgViewer");
+  if (ov) ov.remove();
+  document.body.style.overflow = "";
+}
+function deleteGeneratedImage(imgId) {
+  const e = sessionImages.get(imgId);
+  if (e) { try { URL.revokeObjectURL(e.url); } catch (_) {} sessionImages.delete(imgId); }
+  const c = getActive();
+  if (c) {
+    c.messages = c.messages.filter(m => !(m.kind === "genimg" && m.imgId === imgId));
+    c.updatedAt = Date.now(); saveConvs();
+  }
+  closeImageViewer();
+  renderMessages();
+  renderSidebar($("#searchInput").value);
 }
 function handleImageError(code, detail, status) {
   let msg;
