@@ -241,6 +241,14 @@ body {
 .img-viewer-actions { display: flex; gap: 12px; margin-top: 14px; }
 .img-viewer-btn { padding: 10px 22px; border-radius: 999px; border: 1px solid var(--border-strong); background: rgba(255,255,255,.1); color: #fff; font-size: 15px; cursor: pointer; text-decoration: none; }
 .img-viewer-btn.danger { background: rgba(255,80,80,.15); border-color: rgba(255,80,80,.5); }
+/* Premium per-message actions: Copy on every bubble, Edit on your own.
+   Subtle until hover (desktop); always visible on touch devices. */
+.msg-actions { display: flex; gap: 6px; margin-top: 8px; opacity: 0; transition: opacity .18s ease; }
+.msg:hover .msg-actions, .msg:focus-within .msg-actions { opacity: 1; }
+@media (hover: none) { .msg-actions { opacity: .9; } }
+.msg-act { font-size: 12px; padding: 4px 14px; border-radius: 999px; border: 1px solid var(--border-strong); background: rgba(255,255,255,.06); color: inherit; cursor: pointer; }
+.msg-act:hover { background: rgba(255,255,255,.16); }
+.msg-act:active { transform: scale(.96); }
 
 /* Image-generation "painting" placeholder (ChatGPT-style shimmer) */
 .imggen-art {
