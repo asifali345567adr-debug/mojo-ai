@@ -672,7 +672,18 @@ textarea.text-input { resize: vertical; min-height: 66px; line-height: 1.5; font
    chat, bottom tab bar. Theme stays the app's white-grey.
    Desktop stays exactly as-is.
    ============================================================ */
-#mobileAvatar, #inviteBtn, #mobileTabs, #plusBtn, #sheetScrim, .sheet { display: none; }
+#mobileAvatar, #mobileTabs, #plusBtn, #sheetScrim, .sheet { display: none; }
+
+/* Invite pill: visible on desktop too (topbar), restyled for mobile below. */
+#inviteBtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 8px 18px; border-radius: 999px; cursor: pointer;
+  background: #ececee; border: 1px solid var(--border-strong);
+  color: var(--text); font: 600 13.5px var(--font); white-space: nowrap;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+#inviteBtn:hover { background: #dcdde1; }
+#inviteBtn:active { transform: scale(0.96); }
 
 @media (max-width: 900px) {
   /* ----- Topbar: hamburger · centered avatar · Invite pill ----- */
@@ -681,12 +692,19 @@ textarea.text-input { resize: vertical; min-height: 66px; line-height: 1.5; font
     -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
     padding: 8px 14px 10px; gap: 10px;
     border-bottom: 1px solid var(--border);
+    position: relative;
   }
   #brand, .topbar-spacer, #statusPill, #settingsBtn { display: none !important; }
   #menuBtn { background: transparent; border: 0; color: var(--text); width: 42px; height: 42px; }
-  #mobileAvatar { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 0; }
+  /* Avatar dead-center like the photo: absolute so flex quirks can't hide it. */
+  #mobileAvatar {
+    display: flex; flex-direction: column; align-items: center;
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    pointer-events: none; z-index: 1;
+  }
   #mobileAvatar img { width: 46px; height: 46px; border-radius: 50%; display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.18); }
   #mobileAvatar span { font-size: 12px; font-weight: 600; color: var(--text); margin-top: 3px; letter-spacing: 0.02em; }
+  #inviteBtn { margin-left: auto; }
   #inviteBtn {
     display: inline-flex; align-items: center; justify-content: center;
     padding: 10px 22px; border-radius: 999px; cursor: pointer;
