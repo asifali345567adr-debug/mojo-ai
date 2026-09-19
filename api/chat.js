@@ -88,6 +88,7 @@ export default async function handler(req, res) {
   // cap (PROVIDER_TIMEOUT_MS) still bounds the whole attempt.
   const PER_MODEL_TIMEOUT_MS = 12000;
   let upstream;
+  let syntheticContent = "";
   try {
     const overall = new AbortController();
     const overallTimer = setTimeout(() => overall.abort(), PROVIDER_TIMEOUT_MS);
@@ -162,7 +163,6 @@ export default async function handler(req, res) {
     // retry once in non-stream mode and synthesize the sanitized SSE from the
     // full reply — the user still gets their answer instead of an error.
     // Still 100% free; no key credit is ever touched by this path.
-    let syntheticContent = "";
     if (!out.ok && usePollinations && userText) {
       const fbCtrl = new AbortController();
       const fbTimer = setTimeout(() => fbCtrl.abort(), 20000);
