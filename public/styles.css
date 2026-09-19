@@ -230,6 +230,37 @@ body {
 .msg .bubble pre.code code { font-family: var(--mono); color: #cfe3f5; }
 .msg-img { max-width: 280px; border-radius: 12px; border: 1px solid var(--border-strong); display: block; margin-bottom: 8px; }
 
+/* Image-generation "painting" placeholder (ChatGPT-style shimmer) */
+.imggen-art {
+  position: relative; width: 100%; max-width: 300px; aspect-ratio: 1 / 1;
+  border-radius: 12px; overflow: hidden; border: 1px solid var(--border-strong);
+  background: #12161f; margin-bottom: 8px;
+}
+.imggen-shimmer {
+  position: absolute; inset: 0;
+  background: linear-gradient(110deg, #12161f 25%, #1d2534 42%, #31415c 50%, #1d2534 58%, #12161f 75%);
+  background-size: 220% 100%;
+  animation: imgshimmer 1.7s linear infinite;
+}
+@keyframes imgshimmer { to { background-position: -220% 0; } }
+.imggen-label {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 26px 12px 10px; font-size: 13px; color: #c3cede;
+  background: linear-gradient(transparent, rgba(6,8,12,0.88));
+  pointer-events: none;
+}
+/* Download button under a generated image */
+.img-actions { margin: 0 0 10px; }
+.img-dl {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 15px; border-radius: 999px; font-size: 13.5px; font-weight: 600;
+  color: #eef2f9; text-decoration: none; border: 1px solid var(--border-strong);
+  background: rgba(255,255,255,0.05);
+}
+.img-dl::before { content: "\2B07"; font-size: 13px; }
+.img-dl:hover { background: rgba(255,255,255,0.11); }
+.img-dl:active { transform: scale(0.97); }
+
 .msg.error .bubble {
   background: rgba(255,93,93,0.08); border: 1px solid rgba(255,93,93,0.4);
   border-radius: 14px; padding: 11px 16px; color: #ffc9c9; font-size: 14px; flex: 1;

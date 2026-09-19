@@ -680,6 +680,10 @@ function renderMessages() {
   if (!has) return;
   for (const m of c.messages) {
     if (m.role === "error") appendErrorBubble(m.text, false);
+    else if (m.kind === "genimg" && m.imgId && sessionImages.has(m.imgId)) {
+      const e = sessionImages.get(m.imgId);
+      appendGeneratedImage(m.imgId, e.url, e.type, false);
+    }
     else appendMessageBubble(m.role, m.text, m.img, false);
   }
   scrollBottom();
@@ -1115,9 +1119,15 @@ function updateImgPreview() {
   else { box.hidden = true; $("#imgPrevImg").removeAttribute("src"); }
 }
 
-/* ================= Free image generation (Pollinations, no key needed) ================= */
+/* ================= Free image generation ================= */
 const IMAGE_TIMEOUT_MS = 75000;
 let generatingImage = false;
+/* Generated images live as blob URLs for this page session only: the bytes are
+   never written to localStorage (too big, and the URL dies with the page), so
+   messages carry only a tiny imgId and this map resolves it while the session
+   lasts. The Download button below each image uses the same blob URL. */
+const sessionImages = new Map(); // imgId -> { url, type }
+let imgSeq = 0;
 async function generateImage() {
   const prompt = ($("#input").value || "").trim();
   if (generatingImage || sending) return;
@@ -1133,7 +1143,7 @@ async function generateImage() {
   renderMessages();
   generatingImage = true;
   setCoreState("thinking");
-  appendThinking();
+  appendImagePlaceholder();
   const ctrl = new AbortController();
   const timer = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, IMAGE_TIMEOUT_MS);
   try {
@@ -1144,22 +1154,26 @@ async function generateImage() {
       signal: ctrl.signal
     });
     const ct = res.headers.get("content-type") || "";
-    removeThinking();
+    removeImagePlaceholder();
     if (!res.ok || !ct.startsWith("image/")) {
       const data = await res.json().catch(() => ({}));
       handleImageError(data.error, data.detail, res.status);
     } else {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      // The blob URL lives only for this page session: it is shown now but
-      // never written to history, so a reload can never leave a broken image.
-      c.messages.push({ role: "assistant", text: "Image generated — shown above (this session only).", ts: Date.now() });
+      const imgId = "img-" + Date.now().toString(36) + "-" + (++imgSeq);
+      const type = (blob.type || ct.split(";")[0] || "image/png").toLowerCase();
+      sessionImages.set(imgId, { url, type });
+      // Persist only the tiny imgId — never the blob URL (dies with the page)
+      // and never the bytes (localStorage quota). After a reload the caption
+      // remains but the picture is gone, same as before.
+      c.messages.push({ role: "assistant", kind: "genimg", imgId, text: "Here's your image, sir.", ts: Date.now() });
       c.updatedAt = Date.now(); saveConvs();
-      appendMessageBubble("assistant", "Here's your image, sir.", url, true);
+      appendGeneratedImage(imgId, url, type, true);
       renderSidebar($("#searchInput").value);
     }
   } catch (e) {
-    removeThinking();
+    removeImagePlaceholder();
     if (e && e.name === "AbortError") handleImageError("IMAGE_TIMEOUT", "", 0);
     else handleImageError("NETWORK", "", 0);
   } finally {
@@ -1167,6 +1181,63 @@ async function generateImage() {
     generatingImage = false;
     if (!listening) setCoreState("idle");
   }
+}
+/* ChatGPT-style "painting" placeholder shown while the image generates. */
+function appendImagePlaceholder() {
+  const wrap = $("#messages");
+  const div = document.createElement("div");
+  div.className = "msg assistant"; div.id = "imgGenRow";
+  const av = document.createElement("div");
+  av.className = "avatar"; av.textContent = "M";
+  const bub = document.createElement("div");
+  bub.className = "bubble";
+  const art = document.createElement("div");
+  art.className = "imggen-art";
+  art.setAttribute("aria-busy", "true");
+  art.innerHTML = '<div class="imggen-shimmer"></div><div class="imggen-label">Generating your image, sir&hellip;</div>';
+  bub.appendChild(art);
+  div.appendChild(av); div.appendChild(bub);
+  wrap.appendChild(div); scrollBottom();
+}
+function removeImagePlaceholder() {
+  const t = $("#imgGenRow");
+  if (t) t.remove();
+}
+function imgExtFor(type) {
+  if (type === "image/png") return ".png";
+  if (type === "image/webp") return ".webp";
+  if (type === "image/gif") return ".gif";
+  return ".jpg";
+}
+/* Generated image bubble: the picture plus a Download button underneath. */
+function appendGeneratedImage(imgId, url, type, animate) {
+  const wrap = $("#messages");
+  const div = document.createElement("div");
+  div.className = "msg assistant";
+  div.dataset.imgId = imgId;
+  const av = document.createElement("div");
+  av.className = "avatar"; av.textContent = "M";
+  const bub = document.createElement("div");
+  bub.className = "bubble";
+  const im = document.createElement("img");
+  im.className = "msg-img"; im.src = url; im.alt = "Generated image";
+  bub.appendChild(im);
+  const row = document.createElement("div");
+  row.className = "img-actions";
+  const dl = document.createElement("a");
+  dl.className = "img-dl";
+  dl.href = url;
+  dl.download = "mojo-image" + imgExtFor(type);
+  dl.textContent = "Download";
+  row.appendChild(dl);
+  bub.appendChild(row);
+  const body = document.createElement("div");
+  bub.appendChild(body);
+  div.appendChild(av); div.appendChild(bub);
+  wrap.appendChild(div);
+  if (animate) typewriter(body, "Here's your image, sir.", () => { scrollBottom(); });
+  else body.innerHTML = renderMarkdown("Here's your image, sir.");
+  scrollBottom();
 }
 function handleImageError(code, detail, status) {
   let msg;
